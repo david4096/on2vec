@@ -288,3 +288,299 @@ def create_embedding_metadata(owl_file, model_config=None, alignment_info=None, 
         metadata['source_file_modified'] = datetime.fromtimestamp(stat.st_mtime).isoformat()
 
     return metadata
+
+
+def inspect_parquet_metadata(parquet_file):
+    """
+    Display metadata from a Parquet file in a nicely formatted way.
+
+    Args:
+        parquet_file (str): Path to the Parquet file
+
+    Returns:
+        dict: The metadata dictionary
+    """
+    logger.info(f"Inspecting metadata from: {parquet_file}")
+
+    try:
+        parquet_file_obj = pq.ParquetFile(parquet_file)
+        arrow_table = parquet_file_obj.read()
+
+        print(f"\n📊 Embedding File: {parquet_file}")
+        print("=" * 60)
+
+        # Basic file info
+        df = pl.from_arrow(arrow_table)
+        num_embeddings = len(df)
+        embedding_dim = len(df['embedding'][0]) if num_embeddings > 0 else 0
+
+        print(f"📈 Embeddings: {num_embeddings:,} vectors")
+        print(f"📐 Dimensions: {embedding_dim}")
+
+        # Extract and display metadata
+        metadata = {}
+        if arrow_table.schema.metadata:
+            import json
+            for key, value in arrow_table.schema.metadata.items():
+                key_str = key.decode() if isinstance(key, bytes) else key
+                value_str = value.decode() if isinstance(value, bytes) else value
+
+                if key_str.startswith('on2vec.'):
+                    metadata_key = key_str[7:]  # Remove 'on2vec.' prefix
+                    try:
+                        metadata[metadata_key] = json.loads(value_str)
+                    except json.JSONDecodeError:
+                        metadata[metadata_key] = value_str
+
+        if metadata:
+            print(f"\n🏷️  Metadata:")
+            print("-" * 30)
+
+            # Display key metadata fields in a nice format
+            if 'source_ontology_file' in metadata:
+                print(f"📄 Source Ontology: {metadata['source_ontology_file']}")
+
+            if 'generation_timestamp' in metadata:
+                from datetime import datetime
+                try:
+                    timestamp = datetime.fromisoformat(metadata['generation_timestamp'])
+                    print(f"⏰ Generated: {timestamp.strftime('%Y-%m-%d %H:%M:%S')}")
+                except:
+                    print(f"⏰ Generated: {metadata['generation_timestamp']}")
+
+            if 'model_config' in metadata:
+                config = metadata['model_config']
+                print(f"🤖 Model: {config.get('model_type', 'unknown').upper()}")
+                print(f"   └─ Hidden: {config.get('hidden_dim', 'unknown')}, Output: {config.get('out_dim', 'unknown')}")
+                if 'loss_function' in config:
+                    print(f"   └─ Loss: {config['loss_function']}")
+
+            if 'alignment_info' in metadata:
+                align = metadata['alignment_info']
+                print(f"🔗 Alignment: {align.get('aligned_classes', 0)}/{align.get('total_classes', 0)} classes")
+                if 'alignment_ratio' in align:
+                    print(f"   └─ Ratio: {align['alignment_ratio']:.1%}")
+
+            if 'source_file_size' in metadata:
+                size_mb = int(metadata['source_file_size']) / (1024 * 1024)
+                print(f"📊 Source Size: {size_mb:.1f} MB")
+
+            # Show any additional metadata
+            shown_keys = {'source_ontology_file', 'generation_timestamp', 'model_config',
+                         'alignment_info', 'source_file_size', 'source_file_modified',
+                         'source_ontology_path', 'on2vec_version'}
+
+            additional = {k: v for k, v in metadata.items() if k not in shown_keys}
+            if additional:
+                print(f"\n📋 Additional Metadata:")
+                for key, value in additional.items():
+                    if isinstance(value, (dict, list)):
+                        print(f"   {key}: {json.dumps(value, indent=2)}")
+                    else:
+                        print(f"   {key}: {value}")
+
+        print("\n" + "=" * 60)
+
+        return metadata
+
+    except Exception as e:
+        logger.error(f"Failed to inspect metadata: {e}")
+        raise
+
+
+def convert_parquet_to_csv(parquet_file, csv_file=None):
+    """
+    Convert a Parquet embedding file to CSV format.
+
+    Args:
+        parquet_file (str): Path to input Parquet file
+        csv_file (str, optional): Path to output CSV file. If None, uses same name with .csv extension
+
+    Returns:
+        str: Path to the created CSV file
+    """
+    if csv_file is None:
+        csv_file = parquet_file.replace('.parquet', '.csv')
+
+    logger.info(f"Converting {parquet_file} to {csv_file}")
+
+    try:
+        # Load embeddings from Parquet
+        node_ids, embeddings = load_embeddings_from_parquet(parquet_file)
+
+        # Create DataFrame with embedding columns
+        embedding_dim = embeddings.shape[1]
+        embedding_cols = [f'dim_{i}' for i in range(embedding_dim)]
+
+        data = {'node_id': node_ids}
+        for i, col in enumerate(embedding_cols):
+            data[col] = embeddings[:, i]
+
+        df = pl.DataFrame(data)
+        df.write_csv(csv_file)
+
+        logger.info(f"CSV file created: {csv_file}")
+        logger.info(f"Converted {len(node_ids)} embeddings with {embedding_dim} dimensions")
+
+        return csv_file
+
+    except Exception as e:
+        logger.error(f"Failed to convert to CSV: {e}")
+        raise
+
+
+def load_embeddings_as_dataframe(parquet_file, return_metadata=False):
+    """
+    Load embeddings from Parquet file as a Polars DataFrame.
+
+    Args:
+        parquet_file (str): Path to the Parquet file
+        return_metadata (bool): Whether to return metadata along with DataFrame
+
+    Returns:
+        pl.DataFrame or tuple: DataFrame with 'node_id' and 'embedding' columns,
+                              optionally with metadata dict
+    """
+    logger.info(f"Loading embeddings as DataFrame from: {parquet_file}")
+
+    try:
+        parquet_file_obj = pq.ParquetFile(parquet_file)
+        arrow_table = parquet_file_obj.read()
+        df = pl.from_arrow(arrow_table)
+
+        logger.info(f"Loaded DataFrame with {len(df)} rows")
+
+        if return_metadata:
+            metadata = {}
+            if arrow_table.schema.metadata:
+                import json
+                for key, value in arrow_table.schema.metadata.items():
+                    key_str = key.decode() if isinstance(key, bytes) else key
+                    value_str = value.decode() if isinstance(value, bytes) else value
+
+                    if key_str.startswith('on2vec.'):
+                        metadata_key = key_str[7:]  # Remove 'on2vec.' prefix
+                        try:
+                            metadata[metadata_key] = json.loads(value_str)
+                        except json.JSONDecodeError:
+                            metadata[metadata_key] = value_str
+
+            return df, metadata
+        else:
+            return df
+
+    except Exception as e:
+        logger.error(f"Failed to load DataFrame: {e}")
+        raise
+
+
+def add_embedding_vectors(parquet_file1, node_id1, parquet_file2, node_id2):
+    """
+    Add two embedding vectors from potentially different Parquet files.
+
+    Args:
+        parquet_file1 (str): Path to first Parquet file
+        node_id1 (str): Node ID in first file
+        parquet_file2 (str): Path to second Parquet file
+        node_id2 (str): Node ID in second file
+
+    Returns:
+        np.ndarray: Sum of the two embedding vectors
+    """
+    logger.info(f"Adding vectors: {node_id1} + {node_id2}")
+
+    try:
+        # Load first embedding
+        df1 = load_embeddings_as_dataframe(parquet_file1)
+        row1 = df1.filter(pl.col('node_id') == node_id1)
+        if len(row1) == 0:
+            raise ValueError(f"Node ID '{node_id1}' not found in {parquet_file1}")
+        embedding1 = np.array(row1['embedding'][0])
+
+        # Load second embedding
+        df2 = load_embeddings_as_dataframe(parquet_file2)
+        row2 = df2.filter(pl.col('node_id') == node_id2)
+        if len(row2) == 0:
+            raise ValueError(f"Node ID '{node_id2}' not found in {parquet_file2}")
+        embedding2 = np.array(row2['embedding'][0])
+
+        # Check dimensions match
+        if embedding1.shape != embedding2.shape:
+            raise ValueError(f"Embedding dimensions don't match: {embedding1.shape} vs {embedding2.shape}")
+
+        result = embedding1 + embedding2
+        logger.info(f"Vector addition successful, result dimension: {result.shape}")
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Failed to add vectors: {e}")
+        raise
+
+
+def subtract_embedding_vectors(parquet_file1, node_id1, parquet_file2, node_id2):
+    """
+    Subtract two embedding vectors from potentially different Parquet files.
+
+    Args:
+        parquet_file1 (str): Path to first Parquet file (minuend)
+        node_id1 (str): Node ID in first file
+        parquet_file2 (str): Path to second Parquet file (subtrahend)
+        node_id2 (str): Node ID in second file
+
+    Returns:
+        np.ndarray: Difference of the two embedding vectors (vector1 - vector2)
+    """
+    logger.info(f"Subtracting vectors: {node_id1} - {node_id2}")
+
+    try:
+        # Load first embedding
+        df1 = load_embeddings_as_dataframe(parquet_file1)
+        row1 = df1.filter(pl.col('node_id') == node_id1)
+        if len(row1) == 0:
+            raise ValueError(f"Node ID '{node_id1}' not found in {parquet_file1}")
+        embedding1 = np.array(row1['embedding'][0])
+
+        # Load second embedding
+        df2 = load_embeddings_as_dataframe(parquet_file2)
+        row2 = df2.filter(pl.col('node_id') == node_id2)
+        if len(row2) == 0:
+            raise ValueError(f"Node ID '{node_id2}' not found in {parquet_file2}")
+        embedding2 = np.array(row2['embedding'][0])
+
+        # Check dimensions match
+        if embedding1.shape != embedding2.shape:
+            raise ValueError(f"Embedding dimensions don't match: {embedding1.shape} vs {embedding2.shape}")
+
+        result = embedding1 - embedding2
+        logger.info(f"Vector subtraction successful, result dimension: {result.shape}")
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Failed to subtract vectors: {e}")
+        raise
+
+
+def get_embedding_vector(parquet_file, node_id):
+    """
+    Get a single embedding vector from a Parquet file.
+
+    Args:
+        parquet_file (str): Path to Parquet file
+        node_id (str): Node ID to retrieve
+
+    Returns:
+        np.ndarray: The embedding vector
+    """
+    try:
+        df = load_embeddings_as_dataframe(parquet_file)
+        row = df.filter(pl.col('node_id') == node_id)
+        if len(row) == 0:
+            raise ValueError(f"Node ID '{node_id}' not found in {parquet_file}")
+
+        return np.array(row['embedding'][0])
+
+    except Exception as e:
+        logger.error(f"Failed to get embedding vector: {e}")
+        raise

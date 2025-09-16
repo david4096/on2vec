@@ -58,7 +58,13 @@ python main.py EDAM.owl --skip_training --model_output edam_model.pt --output em
 
 ### Using as Python Package
 ```python
-from on2vec import train_model, generate_embeddings_from_model
+from on2vec import (
+    train_model,
+    generate_embeddings_from_model,
+    inspect_parquet_metadata,
+    load_embeddings_as_dataframe,
+    add_embedding_vectors
+)
 
 # Train model
 result = train_model(owl_file="EDAM.owl", model_output="model.pt")
@@ -68,6 +74,59 @@ embeddings = generate_embeddings_from_model(
     model_path="model.pt",
     owl_file="EDAM.owl"
 )
+
+# Work with embedding files
+inspect_parquet_metadata("embeddings.parquet")
+df = load_embeddings_as_dataframe("embeddings.parquet")
+result_vector = add_embedding_vectors("embeddings.parquet", "Class1", "embeddings.parquet", "Class2")
+```
+
+### Working with Embedding Files
+
+The toolkit includes comprehensive utilities for working with the generated Parquet files:
+
+#### Parquet Tools CLI
+```bash
+# Inspect metadata and basic info
+python parquet_tools.py inspect embeddings.parquet
+
+# List all concept IDs
+python parquet_tools.py list embeddings.parquet --numbered
+
+# Get specific embedding vector
+python parquet_tools.py get embeddings.parquet "http://example.org/concept1" --format list
+
+# Convert to CSV format
+python parquet_tools.py convert embeddings.parquet --output embeddings.csv
+
+# Vector arithmetic operations
+python parquet_tools.py add embeddings.parquet "concept1" "concept2"
+python parquet_tools.py subtract file1.parquet "concept1" file2.parquet "concept2"
+```
+
+#### Python API for Embedding Analysis
+```python
+from on2vec import (
+    load_embeddings_as_dataframe,
+    get_embedding_vector,
+    convert_parquet_to_csv,
+    add_embedding_vectors,
+    subtract_embedding_vectors
+)
+
+# Load as DataFrame for analysis
+df, metadata = load_embeddings_as_dataframe("embeddings.parquet", return_metadata=True)
+print(f"Loaded {len(df)} embeddings with metadata: {list(metadata.keys())}")
+
+# Get individual vectors
+vector1 = get_embedding_vector("embeddings.parquet", "http://example.org/concept1")
+
+# Perform vector operations
+sum_vector = add_embedding_vectors("file1.parquet", "concept1", "file2.parquet", "concept2")
+diff_vector = subtract_embedding_vectors("file1.parquet", "concept1", "file1.parquet", "concept2")
+
+# Convert formats
+csv_file = convert_parquet_to_csv("embeddings.parquet")
 ```
 
 ## Current Architecture
@@ -86,12 +145,15 @@ The toolkit is organized into a clean package structure:
 - **`train.py`** - Train GNN models on ontologies
 - **`embed.py`** - Generate embeddings using trained models
 - **`main.py`** - Integrated training + embedding workflow
+- **`parquet_tools.py`** - Comprehensive utilities for working with embedding files
 
 ### Package Features (Completed ✅)
 - Importable Python modules for programmatic use
 - Model checkpointing with complete metadata preservation
 - Ontology alignment between training and target ontologies
 - Rich Parquet metadata describing source ontologies
+- Comprehensive embedding file utilities (inspect, convert, vector operations)
+- DataFrame integration for analysis workflows
 - Comprehensive logging and error handling
 
 ## Future Roadmap
@@ -163,11 +225,12 @@ on2vec/
 │   ├── training.py      # Training workflows
 │   ├── embedding.py     # Embedding generation
 │   ├── ontology.py      # OWL processing
-│   ├── io.py           # File operations
+│   ├── io.py           # File operations & parquet utilities
 │   └── loss_functions.py # Loss implementations
 ├── train.py            # CLI: Train models
 ├── embed.py            # CLI: Generate embeddings
 ├── main.py             # CLI: Integrated workflow
+├── parquet_tools.py    # CLI: Parquet file utilities
 └── pyproject.toml      # Package configuration
 ```
 

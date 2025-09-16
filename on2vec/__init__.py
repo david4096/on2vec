@@ -6,7 +6,17 @@ from .models import OntologyGNN
 from .training import train_model, load_model_checkpoint, save_model_checkpoint
 from .embedding import generate_embeddings_from_model
 from .ontology import build_graph_from_owl
-from .io import save_embeddings_to_parquet, load_embeddings_from_parquet, create_embedding_metadata
+from .io import (
+    save_embeddings_to_parquet,
+    load_embeddings_from_parquet,
+    create_embedding_metadata,
+    inspect_parquet_metadata,
+    convert_parquet_to_csv,
+    load_embeddings_as_dataframe,
+    add_embedding_vectors,
+    subtract_embedding_vectors,
+    get_embedding_vector
+)
 
 __version__ = "0.1.0"
 __all__ = [
@@ -18,5 +28,11 @@ __all__ = [
     "build_graph_from_owl",
     "save_embeddings_to_parquet",
     "load_embeddings_from_parquet",
-    "create_embedding_metadata"
+    "create_embedding_metadata",
+    "inspect_parquet_metadata",
+    "convert_parquet_to_csv",
+    "load_embeddings_as_dataframe",
+    "add_embedding_vectors",
+    "subtract_embedding_vectors",
+    "get_embedding_vector"
 ]
