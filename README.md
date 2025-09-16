@@ -4,15 +4,16 @@ A toolkit for generating vector embeddings from OWL ontologies using Graph Neura
 
 ## Overview
 
-on2vec converts OWL ontologies into graph representations and learns node embeddings using various GNN architectures (GCN, GAT) and loss functions. The toolkit provides visualization capabilities including UMAP projections, force-directed layouts, and animated transitions between different representations.
+on2vec converts OWL ontologies into graph representations and learns node embeddings using various GNN architectures (GCN, GAT) and loss functions. The toolkit uses a two-phase approach: first train a model, then generate embeddings for any ontology using the trained model.
 
 ## Features
 
+- **Two-Phase Workflow**: Separate training and embedding steps for efficiency
 - **Multiple GNN Models**: Support for GCN and GAT architectures
 - **Various Loss Functions**: Triplet, contrastive, cosine, and cross-entropy losses
-- **Rich Visualizations**: UMAP projections, force-directed layouts, animated transitions
-- **Batch Processing**: Process entire directories of OWL files
-- **Flexible Output**: Parquet files for embeddings, PNG for visualizations, GIF for animations
+- **Model Checkpointing**: Save and reuse trained models across different ontologies
+- **Rich Metadata**: Parquet files include comprehensive metadata about source ontologies
+- **Package Structure**: Importable Python modules with CLI scripts
 
 ## Installation
 
@@ -30,7 +31,7 @@ source .venv/bin/activate
 
 ## Quick Start
 
-### Two-Step Workflow
+### Recommended Two-Phase Workflow
 
 #### 1. Train a model (one-time setup):
 ```bash
@@ -39,67 +40,103 @@ python train.py EDAM.owl --model_type gcn --hidden_dim 128 --out_dim 64 --epochs
 
 #### 2. Generate embeddings using the trained model:
 ```bash
-python embed.py edam_model.pt EDAM.owl --output embeddings.parquet
+# Embed the same ontology used for training
+python embed.py edam_model.pt EDAM.owl --output edam_embeddings.parquet
+
+# Or embed a different ontology using the same trained model
+python embed.py edam_model.pt other_ontology.owl --output other_embeddings.parquet
 ```
 
-#### 3. Create UMAP visualization:
+### Alternative: Integrated Workflow
 ```bash
-python viz.py embeddings.parquet --output visualization.png
-```
-
-### Legacy Single-Step (deprecated):
-```bash
+# Train and embed in one step (backwards compatible)
 python main.py EDAM.owl --model_type gcn --hidden_dim 128 --out_dim 64 --epochs 100 --output embeddings.parquet
+
+# Skip training and use existing model
+python main.py EDAM.owl --skip_training --model_output edam_model.pt --output embeddings.parquet
 ```
 
-## Roadmap: Unified CLI Tool
+### Using as Python Package
+```python
+from on2vec import train_model, generate_embeddings_from_model
 
-To improve usability, the following tasks are planned to consolidate the separate scripts into a single, installable CLI tool:
+# Train model
+result = train_model(owl_file="EDAM.owl", model_output="model.pt")
 
-### Phase 1: CLI Consolidation
-- [x] Split training and embedding into separate steps (`train.py` and `embed.py`)
-- [ ] Create `on2vec/cli.py` with click-based command structure
-- [ ] Implement `on2vec train` command (consolidates `train.py` functionality)
-- [ ] Implement `on2vec embed` command (consolidates `embed.py` functionality)
-- [ ] Implement `on2vec visualize` command (consolidates `viz.py` functionality)
-- [ ] Implement `on2vec layout` command (consolidates `force_layout.py` functionality)
-- [ ] Implement `on2vec animate` command (consolidates `dot_to_embed.py` functionality)
+# Generate embeddings
+embeddings = generate_embeddings_from_model(
+    model_path="model.pt",
+    owl_file="EDAM.owl"
+)
+```
 
-### Phase 2: Package Structure
-- [ ] Refactor core functionality into `on2vec/` module structure:
-  - [ ] `on2vec/models.py` - GNN model definitions
-  - [ ] `on2vec/training.py` - Training loops and loss functions
-  - [ ] `on2vec/visualization.py` - Plotting and animation functions
-  - [ ] `on2vec/ontology.py` - OWL file processing utilities
-  - [ ] `on2vec/io.py` - File I/O operations
-- [ ] Update `pyproject.toml` with proper package structure and entry points
+## Current Architecture
+
+The toolkit is organized into a clean package structure:
+
+### Core Modules (Completed ✅)
+- **`on2vec/models.py`** - GNN model definitions (GCN, GAT)
+- **`on2vec/training.py`** - Training loops, loss functions, model checkpointing
+- **`on2vec/embedding.py`** - Embedding generation from trained models
+- **`on2vec/ontology.py`** - OWL file processing utilities
+- **`on2vec/io.py`** - File I/O operations with rich metadata
+- **`on2vec/loss_functions.py`** - Various loss function implementations
+
+### CLI Scripts (Completed ✅)
+- **`train.py`** - Train GNN models on ontologies
+- **`embed.py`** - Generate embeddings using trained models
+- **`main.py`** - Integrated training + embedding workflow
+
+### Package Features (Completed ✅)
+- Importable Python modules for programmatic use
+- Model checkpointing with complete metadata preservation
+- Ontology alignment between training and target ontologies
+- Rich Parquet metadata describing source ontologies
+- Comprehensive logging and error handling
+
+## Future Roadmap
+
+### Phase 1: CLI Unification
+- [ ] Create unified `on2vec` command with subcommands
+- [ ] Add visualization commands (`on2vec viz`, `on2vec layout`)
+- [ ] Implement configuration file support
+
+### Phase 2: Distribution
 - [ ] Add comprehensive test suite
+- [ ] Configure for PyPI distribution
+- [ ] Add GitHub Actions for CI/CD
 
-### Phase 3: Installation & Distribution
-- [ ] Configure `pyproject.toml` for pip installation with entry point: `on2vec = on2vec.cli:main`
-- [ ] Add development installation instructions: `pip install -e .`
-- [ ] Create GitHub Actions for automated testing and releases
-- [ ] Publish to PyPI for `pip install on2vec`
-- [ ] Add shell completion support
+### Phase 3: Enhanced Features
+- [ ] Embedding similarity search
+- [ ] Support for additional ontology formats
+- [ ] Interactive visualization tools
 
-### Phase 4: Enhanced Features
-- [ ] Add configuration file support (YAML/TOML)
-- [ ] Implement progress bars and better logging
-- [ ] Add model checkpointing and resume functionality
-- [ ] Support for different ontology formats beyond OWL
-- [ ] Add embedding similarity search capabilities
-
-## Key Benefits of the New Workflow
+## Key Benefits of the Current Architecture
 
 - **Model Reuse**: Train once, embed multiple ontologies
 - **Faster Iteration**: Skip training when experimenting with different ontologies
-- **Model Persistence**: Save and share trained models
-- **Memory Efficiency**: Load models only when needed
-- **Checkpointing**: Models include metadata about training configuration
+- **Model Persistence**: Save and share trained models with complete metadata
+- **Memory Efficiency**: Load models only when needed for embedding
+- **Ontology Alignment**: Automatically aligns classes between training and target ontologies
+- **Rich Metadata**: Parquet files include source ontology information and model configuration
+- **Dual Interface**: Use as CLI scripts or import as Python modules
 
-## Current Usage
+## File Structure
 
-Use the two-step workflow shown in Quick Start for optimal efficiency. The original `main.py` is preserved for backward compatibility. See `CLAUDE.md` for detailed usage examples and architecture information.
+```
+on2vec/
+├── on2vec/              # Package modules
+│   ├── models.py        # GNN architectures
+│   ├── training.py      # Training workflows
+│   ├── embedding.py     # Embedding generation
+│   ├── ontology.py      # OWL processing
+│   ├── io.py           # File operations
+│   └── loss_functions.py # Loss implementations
+├── train.py            # CLI: Train models
+├── embed.py            # CLI: Generate embeddings
+├── main.py             # CLI: Integrated workflow
+└── pyproject.toml      # Package configuration
+```
 
 ## Requirements
 
