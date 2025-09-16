@@ -56,11 +56,11 @@ The demo notebook walks through:
 # Basic GCN model with subclass relations only
 python train.py EDAM.owl --model_type gcn --hidden_dim 128 --out_dim 64 --epochs 100 --model_output edam_model.pt
 
-# Multi-relation RGCN model with all ObjectProperty relations
-python train.py EDAM.owl --model_type rgcn --hidden_dim 128 --out_dim 64 --epochs 100 --model_output edam_rgcn_model.pt --use_multi_relation
+# Multi-relation RGCN model with all ObjectProperty relations (auto-enables multi-relation)
+python train.py EDAM.owl --model_type rgcn --hidden_dim 128 --out_dim 64 --epochs 100 --model_output edam_rgcn_model.pt
 
-# Heterogeneous model with relation-specific layers
-python train.py EDAM.owl --model_type heterogeneous --hidden_dim 128 --out_dim 64 --epochs 100 --model_output edam_hetero_model.pt --use_multi_relation
+# Heterogeneous model with relation-specific layers (auto-enables multi-relation)
+python train.py EDAM.owl --model_type heterogeneous --hidden_dim 128 --out_dim 64 --epochs 100 --model_output edam_hetero_model.pt
 ```
 
 #### 2. Generate embeddings using the trained model:

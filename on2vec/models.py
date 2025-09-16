@@ -183,8 +183,9 @@ class HeterogeneousOntologyGNN(torch.nn.Module):
         self.relation_convs1 = torch.nn.ModuleDict()
         self.relation_convs2 = torch.nn.ModuleDict()
 
-        for rel_type in relation_types:
-            rel_key = str(rel_type)  # Ensure string keys for ModuleDict
+        for i, rel_type in enumerate(relation_types):
+            # Use index-based keys to avoid issues with special characters in IRIs
+            rel_key = f"rel_{i}"
             self.relation_convs1[rel_key] = GCNConv(input_dim, hidden_dim)
             self.relation_convs2[rel_key] = GCNConv(hidden_dim, out_dim)
 
@@ -210,7 +211,7 @@ class HeterogeneousOntologyGNN(torch.nn.Module):
 
         for rel_idx in range(self.num_relations):
             if rel_idx in index_to_relation:
-                rel_name = str(index_to_relation[rel_idx])
+                rel_key = f"rel_{rel_idx}"  # Use index-based key
 
                 # Get edges for this relation type
                 rel_mask = (edge_type == rel_idx)
@@ -218,10 +219,10 @@ class HeterogeneousOntologyGNN(torch.nn.Module):
                     rel_edge_index = edge_index[:, rel_mask]
 
                     # Apply relation-specific convolutions
-                    rel_x = self.relation_convs1[rel_name](x, rel_edge_index)
+                    rel_x = self.relation_convs1[rel_key](x, rel_edge_index)
                     rel_x = F.relu(rel_x)
                     rel_x = F.dropout(rel_x, p=self.dropout, training=self.training)
-                    rel_x = self.relation_convs2[rel_name](rel_x, rel_edge_index)
+                    rel_x = self.relation_convs2[rel_key](rel_x, rel_edge_index)
 
                     relation_embeddings.append(rel_x)
 
