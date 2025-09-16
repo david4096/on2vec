@@ -96,30 +96,63 @@ The toolkit is organized into a clean package structure:
 
 ## Future Roadmap
 
-### Phase 1: CLI Unification
+### Phase 1: Enhanced Graph Modeling
+- [ ] **Multi-Relation Graph Support**: Include object properties, data properties, and custom relations beyond subclass hierarchies
+- [ ] **Semantic Text Integration**: Combine graph structure with text embeddings from class labels, definitions, and annotations
+- [ ] **Configurable Text Models**: Support for different text embedding models (BERT, SentenceTransformers, OpenAI, etc.)
+- [ ] **Rich Semantic Features**: Incorporate rdfs:comment, skos:definition, and other descriptive properties
+- [ ] **Unified Embedding Space**: Merge structural graph embeddings with semantic text embeddings
+
+### Phase 2: Evaluation & Benchmarking
+- [ ] **Evaluation Framework**: Comprehensive metrics for embedding quality assessment
+  - [ ] Intrinsic evaluation (clustering, visualization quality)
+  - [ ] Extrinsic evaluation (downstream task performance)
+  - [ ] Ontology-specific metrics (hierarchy preservation, semantic coherence)
+- [ ] **Benchmark Datasets**: Curated evaluation sets for different ontology domains
+- [ ] **Baseline Comparisons**: Compare against existing ontology embedding methods
+- [ ] **Cross-Domain Evaluation**: Test generalization across different ontology types
+
+### Phase 3: Example Use Cases & Applications
+- [ ] **Semantic Search**: Find similar concepts across ontologies
+- [ ] **Ontology Alignment**: Automated mapping between different ontologies
+- [ ] **Knowledge Graph Completion**: Predict missing relations and concepts
+- [ ] **Recommendation Systems**: Suggest relevant concepts based on embeddings
+- [ ] **Clustering & Taxonomy**: Discover hidden concept groupings
+- [ ] **Interactive Ontology Exploration**: Visual navigation through embedding space
+
+### Phase 4: CLI Unification & Distribution
 - [ ] Create unified `on2vec` command with subcommands
 - [ ] Add visualization commands (`on2vec viz`, `on2vec layout`)
 - [ ] Implement configuration file support
-
-### Phase 2: Distribution
 - [ ] Add comprehensive test suite
 - [ ] Configure for PyPI distribution
 - [ ] Add GitHub Actions for CI/CD
 
-### Phase 3: Enhanced Features
-- [ ] Embedding similarity search
-- [ ] Support for additional ontology formats
-- [ ] Interactive visualization tools
+### Phase 5: Advanced Features
+- [ ] **Multi-Modal Embeddings**: Combine structural, textual, and visual information
+- [ ] **Dynamic Ontology Support**: Handle evolving ontologies over time
+- [ ] **Federated Learning**: Train models across distributed ontology collections
+- [ ] **Interactive Visualization Tools**: Web-based exploration interfaces
+- [ ] **API Server**: REST/GraphQL API for embedding services
 
-## Key Benefits of the Current Architecture
+## Current Capabilities & Limitations
 
-- **Model Reuse**: Train once, embed multiple ontologies
-- **Faster Iteration**: Skip training when experimenting with different ontologies
-- **Model Persistence**: Save and share trained models with complete metadata
-- **Memory Efficiency**: Load models only when needed for embedding
-- **Ontology Alignment**: Automatically aligns classes between training and target ontologies
-- **Rich Metadata**: Parquet files include source ontology information and model configuration
-- **Dual Interface**: Use as CLI scripts or import as Python modules
+### ✅ What It Does Now
+- **Structural Embeddings**: Learns from ontology class hierarchies (subclass relations)
+- **Multiple GNN Architectures**: GCN and GAT models with various loss functions
+- **Model Reuse**: Train once, embed multiple ontologies with automatic class alignment
+- **Rich I/O**: Parquet output with comprehensive metadata about source ontologies
+- **Dual Interface**: CLI scripts and importable Python modules
+
+### 🔄 Current Limitations (Addressed in Roadmap)
+- **Graph Relations**: Only uses subclass hierarchies, ignores other semantic relations
+- **Text Information**: Doesn't incorporate class labels, descriptions, or annotations
+- **Evaluation**: No built-in metrics for embedding quality assessment
+- **Use Cases**: Limited examples of practical applications
+- **Semantic Richness**: Focuses on structure, not semantic meaning of concepts
+
+### 🎯 Vision: Comprehensive Ontology Embeddings
+The roadmap addresses these limitations by evolving toward embeddings that capture both **structural relationships** and **semantic meaning**, enabling rich applications like cross-ontology search, automated alignment, and knowledge discovery.
 
 ## File Structure
 
