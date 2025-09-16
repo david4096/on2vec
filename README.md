@@ -30,19 +30,26 @@ source .venv/bin/activate
 
 ## Quick Start
 
-### Generate embeddings from an OWL file:
+### Two-Step Workflow
+
+#### 1. Train a model (one-time setup):
 ```bash
-python main.py EDAM.owl --model_type gcn --hidden_dim 128 --out_dim 64 --epochs 100 --output embeddings.parquet
+python train.py EDAM.owl --model_type gcn --hidden_dim 128 --out_dim 64 --epochs 100 --model_output edam_model.pt
 ```
 
-### Create UMAP visualization:
+#### 2. Generate embeddings using the trained model:
+```bash
+python embed.py edam_model.pt EDAM.owl --output embeddings.parquet
+```
+
+#### 3. Create UMAP visualization:
 ```bash
 python viz.py embeddings.parquet --output visualization.png
 ```
 
-### Process multiple OWL files:
+### Legacy Single-Step (deprecated):
 ```bash
-python process_dir.py owl_files/ --output_dir output/
+python main.py EDAM.owl --model_type gcn --hidden_dim 128 --out_dim 64 --epochs 100 --output embeddings.parquet
 ```
 
 ## Roadmap: Unified CLI Tool
@@ -50,8 +57,13 @@ python process_dir.py owl_files/ --output_dir output/
 To improve usability, the following tasks are planned to consolidate the separate scripts into a single, installable CLI tool:
 
 ### Phase 1: CLI Consolidation
+- [x] Split training and embedding into separate steps (`train.py` and `embed.py`)
 - [ ] Create `on2vec/cli.py` with click-based command structure
-- [ ] Combine useful tools into easy-to-use CLI
+- [ ] Implement `on2vec train` command (consolidates `train.py` functionality)
+- [ ] Implement `on2vec embed` command (consolidates `embed.py` functionality)
+- [ ] Implement `on2vec visualize` command (consolidates `viz.py` functionality)
+- [ ] Implement `on2vec layout` command (consolidates `force_layout.py` functionality)
+- [ ] Implement `on2vec animate` command (consolidates `dot_to_embed.py` functionality)
 
 ### Phase 2: Package Structure
 - [ ] Refactor core functionality into `on2vec/` module structure:
@@ -77,9 +89,17 @@ To improve usability, the following tasks are planned to consolidate the separat
 - [ ] Support for different ontology formats beyond OWL
 - [ ] Add embedding similarity search capabilities
 
+## Key Benefits of the New Workflow
+
+- **Model Reuse**: Train once, embed multiple ontologies
+- **Faster Iteration**: Skip training when experimenting with different ontologies
+- **Model Persistence**: Save and share trained models
+- **Memory Efficiency**: Load models only when needed
+- **Checkpointing**: Models include metadata about training configuration
+
 ## Current Usage
 
-Until the CLI consolidation is complete, use the individual scripts as shown in the Quick Start section. See `CLAUDE.md` for detailed usage examples and architecture information.
+Use the two-step workflow shown in Quick Start for optimal efficiency. The original `main.py` is preserved for backward compatibility. See `CLAUDE.md` for detailed usage examples and architecture information.
 
 ## Requirements
 
