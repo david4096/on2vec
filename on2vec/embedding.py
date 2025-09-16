@@ -10,18 +10,19 @@ from .ontology import build_graph_from_owl, build_multi_relation_graph_from_owl,
 logger = logging.getLogger(__name__)
 
 
-def generate_embeddings_from_model(model, x, edge_index, new_to_training_idx=None, node_ids=None, edge_type=None, relation_to_index=None):
+def generate_embeddings_from_model(model, x, edge_index, new_to_training_idx=None, node_ids=None, edge_type=None, relation_to_index=None, text_x=None):
     """
     Generate embeddings using a trained model.
 
     Args:
         model (torch.nn.Module): Trained model
-        x (torch.Tensor): Node features
+        x (torch.Tensor): Node features (structural)
         edge_index (torch.Tensor): Graph edge indices
         new_to_training_idx (dict, optional): Mapping from new indices to training indices
         node_ids (list, optional): List of node IDs to use
         edge_type (torch.Tensor, optional): Edge types for multi-relation models
         relation_to_index (dict, optional): Mapping from relation names to indices
+        text_x (torch.Tensor, optional): Text features for TextAugmentedOntologyGNN
 
     Returns:
         tuple: (embeddings, used_node_ids)
@@ -32,8 +33,15 @@ def generate_embeddings_from_model(model, x, edge_index, new_to_training_idx=Non
 
     model.eval()
     with torch.no_grad():
-        # Forward pass - handle multi-relation models
-        if hasattr(model, 'num_relations') and edge_type is not None:
+        # Forward pass - handle different model types
+        from .models import TextAugmentedOntologyGNN
+
+        if isinstance(model, TextAugmentedOntologyGNN):
+            # Text-augmented model
+            if text_x is None:
+                raise ValueError("TextAugmentedOntologyGNN requires text_x features")
+            all_embeddings = model(x, text_x, edge_index)
+        elif hasattr(model, 'num_relations') and edge_type is not None:
             # Multi-relation model
             if hasattr(model, 'relation_types') and relation_to_index is not None:
                 # Heterogeneous model needs relation mapping
@@ -189,6 +197,9 @@ def embed_same_ontology(model_path, owl_file, output_file=None):
         model_config.get('model_type') in ['rgcn', 'weighted_gcn', 'heterogeneous']
     )
 
+    # Check if model is text-augmented
+    is_text_augmented = model_config.get('model_type') == 'text_augmented'
+
     # Build graph from the OWL file
     if use_multi_relation:
         logger.info("Using multi-relation graph building for consistency with training")
@@ -207,10 +218,48 @@ def embed_same_ontology(model_path, owl_file, output_file=None):
     # Use the node IDs from the checkpoint for consistency
     training_node_ids = checkpoint['node_ids']
 
+    # Generate text features if model is text-augmented
+    text_x = None
+    if is_text_augmented:
+        logger.info("Text-augmented model detected, generating text features...")
+        try:
+            from .text_features import (
+                extract_rich_semantic_features_from_owl,
+                create_text_embedding_model,
+                create_text_node_features
+            )
+
+            # Extract text features
+            text_features = extract_rich_semantic_features_from_owl(owl_file)
+
+            # Recreate text embedding model with same config
+            text_model_type = model_config.get('text_model_type', 'sentence_transformer')
+            text_model_name = model_config.get('text_model_name', 'all-MiniLM-L6-v2')
+
+            text_embedding_model = create_text_embedding_model(
+                text_model_type,
+                model_name=text_model_name
+            )
+
+            # Generate text embeddings
+            text_x = create_text_node_features(
+                text_features,
+                class_to_index,
+                text_embedding_model,
+                use_combined=True
+            )
+
+            logger.info(f"Generated text features with shape: {text_x.shape}")
+
+        except Exception as e:
+            logger.error(f"Failed to generate text features: {e}")
+            raise ValueError(f"Text-augmented model requires text features, but generation failed: {e}")
+
     # Generate embeddings (no alignment needed)
     embeddings, node_ids = generate_embeddings_from_model(
         model, x, edge_index, node_ids=training_node_ids,
-        edge_type=edge_type, relation_to_index=relation_to_index
+        edge_type=edge_type, relation_to_index=relation_to_index,
+        text_x=text_x
     )
 
     result = {

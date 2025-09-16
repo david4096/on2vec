@@ -244,3 +244,108 @@ class HeterogeneousOntologyGNN(torch.nn.Module):
         combined = (stacked_embeddings * attention_weights.unsqueeze(-1)).sum(dim=0)
 
         return combined
+
+
+class TextAugmentedOntologyGNN(torch.nn.Module):
+    """
+    Graph Neural Network that combines structural and textual features for ontology embedding.
+    """
+
+    def __init__(self, structural_dim, text_dim, hidden_dim, out_dim,
+                 model_type='gcn', fusion_method='concat', dropout=0.0):
+        """
+        Initialize the Text-Augmented GNN model.
+
+        Args:
+            structural_dim (int): Dimension of structural features
+            text_dim (int): Dimension of text features
+            hidden_dim (int): Hidden layer dimension
+            out_dim (int): Output embedding dimension
+            model_type (str): Type of GNN ('gcn', 'gat')
+            fusion_method (str): How to combine features ('concat', 'add', 'attention')
+            dropout (float): Dropout rate
+        """
+        super(TextAugmentedOntologyGNN, self).__init__()
+        self.structural_dim = structural_dim
+        self.text_dim = text_dim
+        self.hidden_dim = hidden_dim
+        self.out_dim = out_dim
+        self.model_type = model_type
+        self.fusion_method = fusion_method
+        self.dropout = dropout
+
+        # Feature fusion layer
+        if fusion_method == 'concat':
+            self.input_dim = structural_dim + text_dim
+            self.fusion_layer = None
+        elif fusion_method == 'add':
+            if structural_dim != text_dim:
+                # Project to same dimension for addition
+                self.structural_proj = torch.nn.Linear(structural_dim, text_dim)
+                self.input_dim = text_dim
+            else:
+                self.structural_proj = None
+                self.input_dim = structural_dim
+            self.fusion_layer = None
+        elif fusion_method == 'attention':
+            self.input_dim = hidden_dim
+            self.fusion_layer = torch.nn.MultiheadAttention(hidden_dim, num_heads=4, batch_first=True)
+            self.structural_proj = torch.nn.Linear(structural_dim, hidden_dim)
+            self.text_proj = torch.nn.Linear(text_dim, hidden_dim)
+        else:
+            raise ValueError(f"Unknown fusion method: {fusion_method}")
+
+        # GNN layers
+        if model_type == 'gcn':
+            self.conv1 = GCNConv(self.input_dim, hidden_dim)
+            self.conv2 = GCNConv(hidden_dim, out_dim)
+        elif model_type == 'gat':
+            self.conv1 = GATConv(self.input_dim, hidden_dim)
+            self.conv2 = GATConv(hidden_dim, out_dim)
+        else:
+            raise ValueError("Unsupported model type. Use 'gcn' or 'gat'.")
+
+        logger.info(f"Initialized TextAugmentedOntologyGNN: {fusion_method} fusion, {model_type} backbone")
+
+    def forward(self, structural_x, text_x, edge_index):
+        """
+        Forward pass combining structural and textual features.
+
+        Args:
+            structural_x (torch.Tensor): Structural node features
+            text_x (torch.Tensor): Text node features
+            edge_index (torch.Tensor): Graph edge indices
+
+        Returns:
+            torch.Tensor: Node embeddings
+        """
+        # Fuse structural and text features
+        if self.fusion_method == 'concat':
+            x = torch.cat([structural_x, text_x], dim=1)
+        elif self.fusion_method == 'add':
+            if self.structural_proj is not None:
+                structural_x = self.structural_proj(structural_x)
+            x = structural_x + text_x
+        elif self.fusion_method == 'attention':
+            # Project both feature types to same dimension
+            structural_proj = self.structural_proj(structural_x)
+            text_proj = self.text_proj(text_x)
+
+            # Stack for attention mechanism [batch_size, seq_len=2, hidden_dim]
+            combined = torch.stack([structural_proj, text_proj], dim=1)
+
+            # Apply self-attention
+            attended, _ = self.fusion_layer(combined, combined, combined)
+            # Average or sum the attended representations
+            x = attended.mean(dim=1)
+
+        # Apply dropout
+        x = F.dropout(x, p=self.dropout, training=self.training)
+
+        # Apply GNN layers
+        x = self.conv1(x, edge_index)
+        x = F.relu(x)
+        x = F.dropout(x, p=self.dropout, training=self.training)
+        x = self.conv2(x, edge_index)
+
+        return x

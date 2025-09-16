@@ -82,23 +82,42 @@ python main.py EDAM.owl --model_type gcn --hidden_dim 128 --out_dim 64 --epochs 
 
 # Skip training and use existing model
 python main.py EDAM.owl --skip_training --model_output edam_model.pt --output embeddings.parquet
+
+# NEW: Text-augmented embeddings with semantic features
+python main.py EDAM.owl --use_text_features --text_model_type sentence_transformer --text_model_name all-MiniLM-L6-v2 --fusion_method concat --output text_embeddings.parquet
+
+# Use different text models and fusion methods
+python main.py EDAM.owl --use_text_features --text_model_type huggingface --text_model_name bert-base-uncased --fusion_method attention --output bert_embeddings.parquet
 ```
 
 ### Using as Python Package
 ```python
 from on2vec import (
     train_ontology_embeddings,
+    train_text_augmented_ontology_embeddings,
     embed_ontology_with_model,
     inspect_parquet_metadata,
     load_embeddings_as_dataframe,
     add_embedding_vectors
 )
 
-# Train model
+# Train standard model
 result = train_ontology_embeddings(
     owl_file="EDAM.owl",
     model_output="model.pt",
     model_type="gcn",
+    hidden_dim=64,
+    out_dim=32
+)
+
+# NEW: Train text-augmented model with semantic features
+text_result = train_text_augmented_ontology_embeddings(
+    owl_file="EDAM.owl",
+    model_output="text_model.pt",
+    text_model_type="sentence_transformer",
+    text_model_name="all-MiniLM-L6-v2",
+    backbone_model="gcn",
+    fusion_method="concat",
     hidden_dim=64,
     out_dim=32
 )
@@ -317,10 +336,10 @@ The toolkit is organized into a clean package structure:
   - [x] Extract all ObjectProperty relations from OWL ontologies
   - [x] RGCN and heterogeneous model architectures for multi-relation graphs
   - [x] Relation type analysis and edge distribution statistics
-- [ ] **Semantic Text Integration**: Combine graph structure with text embeddings from class labels, definitions, and annotations
-- [ ] **Configurable Text Models**: Support for different text embedding models (BERT, SentenceTransformers, OpenAI, etc.)
-- [ ] **Rich Semantic Features**: Incorporate rdfs:comment, skos:definition, and other descriptive properties
-- [ ] **Unified Embedding Space**: Merge structural graph embeddings with semantic text embeddings
+- [x] **Semantic Text Integration**: Combine graph structure with text embeddings from class labels, definitions, and annotations ✅
+- [x] **Configurable Text Models**: Support for different text embedding models (BERT, SentenceTransformers, OpenAI, etc.) ✅
+- [x] **Rich Semantic Features**: Incorporate rdfs:comment, skos:definition, and other descriptive properties ✅
+- [x] **Unified Embedding Space**: Merge structural graph embeddings with semantic text embeddings ✅
 
 ### Phase 2: Evaluation & Benchmarking
 - [ ] **Evaluation Framework**: Comprehensive metrics for embedding quality assessment
@@ -362,6 +381,11 @@ The toolkit is organized into a clean package structure:
   - Extract and utilize all semantic relationships from OWL ontologies
   - Support for 79 different ObjectProperty types in complex ontologies like CVDO
   - Typically provides 1.5-2x more edges than hierarchy-only approaches
+- **Text-Augmented Embeddings**: NEW! Combine structural and semantic text features ✅
+  - **Rich Semantic Extraction**: Extract text from rdfs:comment, skos:definition, labels, and annotations
+  - **Configurable Text Models**: Support for SentenceTransformers, HuggingFace, OpenAI, TF-IDF
+  - **Flexible Fusion**: Multiple methods to combine structural + text features (concat, add, weighted, attention)
+  - **CLI Integration**: Full command-line support with `--use_text_features` flag
 - **Advanced GNN Architectures**: GCN, GAT, RGCN, and heterogeneous models
   - **RGCN**: Relational Graph Convolutional Networks for multi-relation support
   - **Heterogeneous**: Relation-specific layers with attention mechanisms
@@ -375,13 +399,11 @@ The toolkit is organized into a clean package structure:
 - **Jupyter Integration**: Interactive demonstration notebook with real ontology examples
 
 ### 🔄 Current Limitations (Addressed in Roadmap)
-- **Text Information**: Doesn't incorporate class labels, descriptions, or annotations
 - **Evaluation**: No built-in metrics for embedding quality assessment
 - **Use Cases**: Limited examples of practical applications
-- **Semantic Richness**: Limited integration of semantic meaning beyond graph structure
 
 ### 🎯 Vision: Comprehensive Ontology Embeddings
-The roadmap addresses these limitations by evolving toward embeddings that capture both **structural relationships** and **semantic meaning**, enabling rich applications like cross-ontology search, automated alignment, and knowledge discovery.
+**ACHIEVED!** ✅ on2vec now captures both **structural relationships** and **semantic meaning** through text-augmented embeddings, enabling rich applications like cross-ontology search, automated alignment, and knowledge discovery.
 
 ## File Structure
 
