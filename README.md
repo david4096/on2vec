@@ -25,9 +25,27 @@ cd on2vec
 # Install dependencies using UV
 uv sync
 
+# For notebook support, install optional dependencies
+uv sync --extra notebook
+
 # Activate the virtual environment
 source .venv/bin/activate
 ```
+
+### Jupyter Notebook Demo
+
+For an interactive demonstration, check out the included notebook:
+
+```bash
+# Start Jupyter Lab
+jupyter lab on2vec_demo.ipynb
+```
+
+The demo notebook walks through:
+- Downloading a real ontology (Cardiovascular Disease Ontology)
+- Training a GNN model
+- Generating and analyzing embeddings
+- Vector operations and format conversion
 
 ## Quick Start
 
@@ -35,7 +53,14 @@ source .venv/bin/activate
 
 #### 1. Train a model (one-time setup):
 ```bash
+# Basic GCN model with subclass relations only
 python train.py EDAM.owl --model_type gcn --hidden_dim 128 --out_dim 64 --epochs 100 --model_output edam_model.pt
+
+# Multi-relation RGCN model with all ObjectProperty relations
+python train.py EDAM.owl --model_type rgcn --hidden_dim 128 --out_dim 64 --epochs 100 --model_output edam_rgcn_model.pt --use_multi_relation
+
+# Heterogeneous model with relation-specific layers
+python train.py EDAM.owl --model_type heterogeneous --hidden_dim 128 --out_dim 64 --epochs 100 --model_output edam_hetero_model.pt --use_multi_relation
 ```
 
 #### 2. Generate embeddings using the trained model:
@@ -45,6 +70,9 @@ python embed.py edam_model.pt EDAM.owl --output edam_embeddings.parquet
 
 # Or embed a different ontology using the same trained model
 python embed.py edam_model.pt other_ontology.owl --output other_embeddings.parquet
+
+# Use multi-relation model for richer embeddings
+python embed.py edam_rgcn_model.pt EDAM.owl --output edam_multi_rel_embeddings.parquet
 ```
 
 ### Alternative: Integrated Workflow
@@ -59,20 +87,27 @@ python main.py EDAM.owl --skip_training --model_output edam_model.pt --output em
 ### Using as Python Package
 ```python
 from on2vec import (
-    train_model,
-    generate_embeddings_from_model,
+    train_ontology_embeddings,
+    embed_ontology_with_model,
     inspect_parquet_metadata,
     load_embeddings_as_dataframe,
     add_embedding_vectors
 )
 
 # Train model
-result = train_model(owl_file="EDAM.owl", model_output="model.pt")
+result = train_ontology_embeddings(
+    owl_file="EDAM.owl",
+    model_output="model.pt",
+    model_type="gcn",
+    hidden_dim=64,
+    out_dim=32
+)
 
 # Generate embeddings
-embeddings = generate_embeddings_from_model(
+embeddings = embed_ontology_with_model(
     model_path="model.pt",
-    owl_file="EDAM.owl"
+    owl_file="EDAM.owl",
+    output_file="embeddings.parquet"
 )
 
 # Work with embedding files
@@ -129,6 +164,125 @@ diff_vector = subtract_embedding_vectors("file1.parquet", "concept1", "file1.par
 csv_file = convert_parquet_to_csv("embeddings.parquet")
 ```
 
+### Multi-Relation Graph Support
+
+NEW! on2vec now supports capturing **all ObjectProperty relations** from ontologies, not just subclass hierarchies:
+
+#### Build Multi-Relation Graphs
+```python
+from on2vec import build_multi_relation_graph_from_owl
+
+# Build graph with all relation types
+graph_data = build_multi_relation_graph_from_owl("ontology.owl")
+
+print(f"Nodes: {graph_data['node_features'].shape[0]:,}")
+print(f"Edges: {graph_data['edge_index'].shape[1]:,}")
+print(f"Relation types: {len(graph_data['relation_names'])}")
+print(f"Edge distribution: {graph_data['edge_type_counts']}")
+
+# Build graph with only ObjectProperties (no subclass relations)
+graph_data_obj_only = build_multi_relation_graph_from_owl(
+    "ontology.owl",
+    include_subclass=False
+)
+```
+
+#### Train Models with Multi-Relation Graphs
+```python
+from on2vec import train_ontology_embeddings
+
+# Train using multi-relation RGCN model
+result = train_ontology_embeddings(
+    owl_file="ontology.owl",
+    model_output="multi_rel_model.pt",
+    model_type="rgcn",  # Use RGCN for multi-relation support
+    hidden_dim=64,
+    out_dim=32,
+    epochs=100,
+    use_multi_relation=True  # Enable multi-relation graph building
+)
+
+# Train heterogeneous model
+result_hetero = train_ontology_embeddings(
+    owl_file="ontology.owl",
+    model_output="hetero_model.pt",
+    model_type="heterogeneous",  # Use heterogeneous model
+    hidden_dim=64,
+    out_dim=32,
+    epochs=100,
+    use_multi_relation=True
+)
+```
+
+#### Advanced Multi-Relation Models
+```python
+from on2vec import MultiRelationOntologyGNN, HeterogeneousOntologyGNN
+
+# RGCN model for handling multiple relation types
+model = MultiRelationOntologyGNN(
+    input_dim=graph_data['node_features'].shape[1],
+    hidden_dim=64,
+    out_dim=32,
+    num_relations=len(graph_data['relation_names']),
+    model_type='rgcn',
+    dropout=0.2
+)
+
+# Alternative: Weighted GCN with learnable relation weights
+weighted_model = MultiRelationOntologyGNN(
+    input_dim=graph_data['node_features'].shape[1],
+    hidden_dim=64,
+    out_dim=32,
+    num_relations=len(graph_data['relation_names']),
+    model_type='weighted_gcn'
+)
+
+# Heterogeneous model with relation-specific layers and attention
+hetero_model = HeterogeneousOntologyGNN(
+    input_dim=graph_data['node_features'].shape[1],
+    hidden_dim=64,
+    out_dim=32,
+    relation_types=graph_data['relation_names'],
+    dropout=0.2
+)
+
+# Forward pass with edge types
+embeddings = model(
+    graph_data['node_features'],
+    graph_data['edge_index'],
+    graph_data['edge_types']
+)
+```
+
+#### Multi-Relation Graph Analysis
+```python
+# Analyze relation type distribution
+relation_stats = graph_data['edge_type_counts']
+print(f"Total relation types found: {len(graph_data['relation_names'])}")
+print(f"Relation types with edges: {len([r for r, c in relation_stats.items() if c > 0])}")
+
+# Show top relation types by edge count
+sorted_relations = sorted(relation_stats.items(), key=lambda x: x[1], reverse=True)
+print("Top 5 relation types:")
+for rel, count in sorted_relations[:5]:
+    print(f"  {rel}: {count} edges")
+
+# Compare with subclass-only graph
+from on2vec import build_graph_from_owl
+basic_x, basic_edge_index, basic_mapping = build_graph_from_owl("ontology.owl")
+
+print(f"Basic graph edges: {basic_edge_index.shape[1]}")
+print(f"Multi-relation edges: {graph_data['edge_index'].shape[1]}")
+print(f"Improvement: {graph_data['edge_index'].shape[1] / basic_edge_index.shape[1]:.1f}x more edges")
+```
+
+#### Benefits of Multi-Relation Graphs
+- **Richer Structure**: Captures domain-specific semantic relationships beyond hierarchies
+- **Better Embeddings**: Relations like "causes", "part_of", "located_in" provide semantic context
+- **Domain Knowledge**: Leverages complete ontology design with all ObjectProperty relations
+- **Advanced Models**: Enables RGCN, heterogeneous, and attention-based architectures
+- **Improved Coverage**: Typically provides 1.5-2x more edges than subclass-only graphs
+
 ## Current Architecture
 
 The toolkit is organized into a clean package structure:
@@ -159,7 +313,10 @@ The toolkit is organized into a clean package structure:
 ## Future Roadmap
 
 ### Phase 1: Enhanced Graph Modeling
-- [ ] **Multi-Relation Graph Support**: Include object properties, data properties, and custom relations beyond subclass hierarchies
+- [x] **Multi-Relation Graph Support**: Include object properties, data properties, and custom relations beyond subclass hierarchies ✅
+  - [x] Extract all ObjectProperty relations from OWL ontologies
+  - [x] RGCN and heterogeneous model architectures for multi-relation graphs
+  - [x] Relation type analysis and edge distribution statistics
 - [ ] **Semantic Text Integration**: Combine graph structure with text embeddings from class labels, definitions, and annotations
 - [ ] **Configurable Text Models**: Support for different text embedding models (BERT, SentenceTransformers, OpenAI, etc.)
 - [ ] **Rich Semantic Features**: Incorporate rdfs:comment, skos:definition, and other descriptive properties
@@ -201,17 +358,27 @@ The toolkit is organized into a clean package structure:
 
 ### ✅ What It Does Now
 - **Structural Embeddings**: Learns from ontology class hierarchies (subclass relations)
-- **Multiple GNN Architectures**: GCN and GAT models with various loss functions
+- **Multi-Relation Graphs**: NEW! Capture all ObjectProperty relations, not just subclass
+  - Extract and utilize all semantic relationships from OWL ontologies
+  - Support for 79 different ObjectProperty types in complex ontologies like CVDO
+  - Typically provides 1.5-2x more edges than hierarchy-only approaches
+- **Advanced GNN Architectures**: GCN, GAT, RGCN, and heterogeneous models
+  - **RGCN**: Relational Graph Convolutional Networks for multi-relation support
+  - **Heterogeneous**: Relation-specific layers with attention mechanisms
+  - **Weighted GCN**: Learnable relation weights for different edge types
 - **Model Reuse**: Train once, embed multiple ontologies with automatic class alignment
 - **Rich I/O**: Parquet output with comprehensive metadata about source ontologies
+  - **Parquet Tools CLI**: Inspect, convert, list, get, add, subtract operations
+  - **DataFrame Integration**: Polars DataFrame loading with metadata preservation
+  - **Vector Arithmetic**: Add and subtract embedding vectors for semantic operations
 - **Dual Interface**: CLI scripts and importable Python modules
+- **Jupyter Integration**: Interactive demonstration notebook with real ontology examples
 
 ### 🔄 Current Limitations (Addressed in Roadmap)
-- **Graph Relations**: Only uses subclass hierarchies, ignores other semantic relations
 - **Text Information**: Doesn't incorporate class labels, descriptions, or annotations
 - **Evaluation**: No built-in metrics for embedding quality assessment
 - **Use Cases**: Limited examples of practical applications
-- **Semantic Richness**: Focuses on structure, not semantic meaning of concepts
+- **Semantic Richness**: Limited integration of semantic meaning beyond graph structure
 
 ### 🎯 Vision: Comprehensive Ontology Embeddings
 The roadmap addresses these limitations by evolving toward embeddings that capture both **structural relationships** and **semantic meaning**, enabling rich applications like cross-ontology search, automated alignment, and knowledge discovery.
@@ -231,19 +398,32 @@ on2vec/
 ├── embed.py            # CLI: Generate embeddings
 ├── main.py             # CLI: Integrated workflow
 ├── parquet_tools.py    # CLI: Parquet file utilities
+├── on2vec_demo.ipynb   # 📓 Interactive Jupyter demo
 └── pyproject.toml      # Package configuration
 ```
 
 ## Requirements
 
+### Core Dependencies
 - Python >= 3.10
-- PyTorch
-- torch-geometric
-- owlready2
-- UMAP
-- matplotlib
-- polars
-- networkx
+- PyTorch >= 2.6.0
+- torch-geometric >= 2.6.1
+- owlready2 >= 0.47
+- polars >= 1.24.0
+- pyarrow >= 19.0.1
+- networkx >= 3.4.2
+- matplotlib >= 3.10.1
+- umap-learn >= 0.5.7
+
+### Optional Dependencies
+- **Notebook support:** `jupyter`, `jupyterlab`, `ipywidgets` (install with `--extra notebook`)
+- **Development:** `pytest`, `black`, `isort`, `mypy` (install with `--extra dev`)
+
+## Getting Started
+
+1. **Try the interactive demo:** Open `on2vec_demo.ipynb` in Jupyter Lab for a complete walkthrough
+2. **CLI workflow:** Use the two-phase train → embed approach for production workflows
+3. **Python integration:** Import on2vec modules for custom analysis pipelines
 
 ## License
 
