@@ -341,14 +341,14 @@ The toolkit is organized into a clean package structure:
 - [x] **Rich Semantic Features**: Incorporate rdfs:comment, skos:definition, and other descriptive properties ✅
 - [x] **Unified Embedding Space**: Merge structural graph embeddings with semantic text embeddings ✅
 
-### Phase 2: Evaluation & Benchmarking
-- [ ] **Evaluation Framework**: Comprehensive metrics for embedding quality assessment
-  - [ ] Intrinsic evaluation (clustering, visualization quality)
-  - [ ] Extrinsic evaluation (downstream task performance)
-  - [ ] Ontology-specific metrics (hierarchy preservation, semantic coherence)
-- [ ] **Benchmark Datasets**: Curated evaluation sets for different ontology domains
-- [ ] **Baseline Comparisons**: Compare against existing ontology embedding methods
-- [ ] **Cross-Domain Evaluation**: Test generalization across different ontology types
+### Phase 2: Evaluation & Benchmarking ✅
+- [x] **Evaluation Framework**: Comprehensive metrics for embedding quality assessment ✅
+  - [x] Intrinsic evaluation (clustering, visualization quality) ✅
+  - [x] Extrinsic evaluation (downstream task performance) ✅
+  - [x] Ontology-specific metrics (hierarchy preservation, semantic coherence) ✅
+- [x] **Benchmark Datasets**: Curated evaluation sets for different ontology domains ✅
+- [x] **Baseline Comparisons**: Compare against existing ontology embedding methods ✅
+- [x] **Cross-Domain Evaluation**: Test generalization across different ontology types ✅
 
 ### Phase 3: Example Use Cases & Applications
 - [ ] **Semantic Search**: Find similar concepts across ontologies
@@ -372,6 +372,132 @@ The toolkit is organized into a clean package structure:
 - [ ] **Federated Learning**: Train models across distributed ontology collections
 - [ ] **Interactive Visualization Tools**: Web-based exploration interfaces
 - [ ] **API Server**: REST/GraphQL API for embedding services
+
+## Evaluation & Benchmarking
+
+### Comprehensive Evaluation Framework
+
+on2vec includes a complete evaluation system for assessing embedding quality:
+
+#### CLI Evaluation Tools
+```bash
+# Evaluate single embedding file with comprehensive metrics
+python evaluate_embeddings.py single embeddings.parquet --ontology ontology.owl --output-dir evaluation_results/
+
+# Benchmark multiple embedding approaches
+python evaluate_embeddings.py benchmark emb1.parquet emb2.parquet emb3.parquet --output-dir benchmark_results/
+
+# Download and manage benchmark datasets
+python benchmark_datasets.py list --domain biology
+python benchmark_datasets.py download --datasets go chebi hp --cache-dir benchmark_cache/
+
+# Compare against baseline methods
+python benchmark_datasets.py compare embeddings.parquet ontology.owl --methods random structural node2vec
+
+# Cross-domain evaluation for generalization testing
+python cross_domain_evaluation.py --train-domains biology chemistry --test-domains medicine --output-dir cross_domain_results/
+```
+
+#### Python API for Evaluation
+```python
+from on2vec import (
+    EmbeddingEvaluator,
+    OntologyBenchmarkDatasets,
+    compare_with_baselines
+)
+
+# Comprehensive evaluation of embeddings
+evaluator = EmbeddingEvaluator("embeddings.parquet", "ontology.owl")
+results = evaluator.create_evaluation_report("evaluation_report.json")
+
+# Visualize evaluation results
+viz_paths = evaluator.visualize_evaluation_results(results, "visualizations/")
+
+# Setup benchmark datasets
+datasets = OntologyBenchmarkDatasets()
+benchmark_files = datasets.download_benchmark_suite(
+    domains=['biology', 'chemistry'],
+    sizes=['small', 'medium']
+)
+
+# Compare with baseline methods
+comparison_results = compare_with_baselines(
+    "embeddings.parquet",
+    "ontology.owl",
+    baseline_methods=['random', 'structural', 'node2vec'],
+    output_dir="baseline_comparison/"
+)
+```
+
+#### Available Evaluation Metrics
+
+**Intrinsic Evaluation:**
+- **Clustering Quality**: Silhouette score, inertia analysis across multiple algorithms (K-means, DBSCAN, hierarchical)
+- **Embedding Distribution**: Norm analysis, dimension utilization, similarity distributions
+- **Dimensionality Analysis**: PCA-based effective dimension calculation, variance explained
+- **Neighborhood Preservation**: Local structure preservation compared to ontology graph
+
+**Extrinsic Evaluation:**
+- **Link Prediction**: Binary classification of ontological relationships using embedding-based features
+- **Hierarchy Preservation**: Statistical comparison of embedding similarities for hierarchically related concepts
+- **Downstream Classification**: Performance on ontology-derived classification tasks
+
+**Ontology-Specific Metrics:**
+- **Structural Consistency**: Correlation between graph centrality measures and embedding properties
+- **Multi-Relation Analysis**: Preservation of different relationship types in multi-relation graphs
+- **Semantic Coherence**: Text-based semantic consistency (when available)
+
+#### Benchmark Datasets
+
+Built-in access to standard ontology datasets across multiple domains:
+
+| Dataset | Domain | Size | Key Relations |
+|---------|--------|------|---------------|
+| **Gene Ontology (GO)** | Biology | Large | subclass, part_of, regulates |
+| **ChEBI** | Chemistry | Large | subclass, has_part, is_conjugate_base_of |
+| **Human Phenotype (HP)** | Medicine | Medium | subclass, part_of, has_modifier |
+| **Mondo Disease** | Medicine | Medium | subclass, has_material_basis_in |
+| **Cell Ontology (CL)** | Biology | Medium | subclass, develops_from, part_of |
+| **EDAM** | Bioinformatics | Small | subclass, has_input, has_output |
+| **CVDO** | Medicine | Small | subclass, has_location, has_symptom |
+
+#### Baseline Methods
+
+Compare against established embedding approaches:
+
+- **Random Baseline**: Random normal embeddings (normalized)
+- **Structural Baseline**: Graph-theoretic features (degree, centrality, clustering coefficient)
+- **Text-Only Baseline**: TF-IDF or other text-based embeddings
+- **Node2Vec**: Skip-gram model with random walks
+- **DeepWalk**: Neural language model on random walks
+
+#### Cross-Domain Evaluation
+
+Test embedding generalization across different ontology domains:
+
+```python
+# Setup cross-domain experiment
+from on2vec.cross_domain_evaluation import CrossDomainEvaluator
+
+evaluator = CrossDomainEvaluator("cross_domain_results/")
+
+# Define model configurations to test
+model_configs = [
+    {'model_type': 'gcn', 'hidden_dim': 128, 'epochs': 100},
+    {'model_type': 'gat', 'hidden_dim': 128, 'epochs': 100},
+    {'model_type': 'rgcn', 'hidden_dim': 128, 'use_multi_relation': True}
+]
+
+# Run comprehensive cross-domain evaluation
+results = evaluator.run_cross_domain_experiment(
+    train_domains=['biology', 'chemistry'],
+    test_domains=['medicine', 'food_science'],
+    model_configs=model_configs
+)
+
+# Generate analysis report
+report_path = evaluator.create_cross_domain_report(results)
+```
 
 ## Current Capabilities & Limitations
 
@@ -397,10 +523,14 @@ The toolkit is organized into a clean package structure:
   - **Vector Arithmetic**: Add and subtract embedding vectors for semantic operations
 - **Dual Interface**: CLI scripts and importable Python modules
 - **Jupyter Integration**: Interactive demonstration notebook with real ontology examples
+- **Comprehensive Evaluation**: NEW! Complete evaluation framework with intrinsic, extrinsic, and ontology-specific metrics ✅
+  - **Benchmark Datasets**: 10+ curated ontology datasets across multiple domains (GO, ChEBI, HP, etc.)
+  - **Baseline Comparisons**: Compare against random, structural, Node2Vec, DeepWalk baselines
+  - **Cross-Domain Testing**: Evaluate embedding generalization across different ontology types
+  - **Visualization Tools**: Automated generation of evaluation plots and comprehensive reports
 
 ### 🔄 Current Limitations (Addressed in Roadmap)
-- **Evaluation**: No built-in metrics for embedding quality assessment
-- **Use Cases**: Limited examples of practical applications
+- **Use Cases**: Limited examples of practical applications (Phase 3)
 
 ### 🎯 Vision: Comprehensive Ontology Embeddings
 **ACHIEVED!** ✅ on2vec now captures both **structural relationships** and **semantic meaning** through text-augmented embeddings, enabling rich applications like cross-ontology search, automated alignment, and knowledge discovery.
@@ -415,11 +545,18 @@ on2vec/
 │   ├── embedding.py     # Embedding generation
 │   ├── ontology.py      # OWL processing
 │   ├── io.py           # File operations & parquet utilities
-│   └── loss_functions.py # Loss implementations
+│   ├── loss_functions.py # Loss implementations
+│   ├── text_features.py # Text feature extraction & embedding
+│   ├── visualization.py # Embedding visualization utilities
+│   ├── evaluation.py   # 🆕 Comprehensive evaluation framework
+│   └── benchmarks.py   # 🆕 Benchmark datasets & baseline methods
 ├── train.py            # CLI: Train models
 ├── embed.py            # CLI: Generate embeddings
 ├── main.py             # CLI: Integrated workflow
 ├── parquet_tools.py    # CLI: Parquet file utilities
+├── evaluate_embeddings.py # 🆕 CLI: Evaluation framework
+├── benchmark_datasets.py  # 🆕 CLI: Benchmark management
+├── cross_domain_evaluation.py # 🆕 CLI: Cross-domain testing
 ├── on2vec_demo.ipynb   # 📓 Interactive Jupyter demo
 └── pyproject.toml      # Package configuration
 ```

@@ -25,6 +25,17 @@ from .visualization import (
     create_visualization_comparison,
     load_embeddings_for_viz
 )
+from .evaluation import (
+    EmbeddingEvaluator,
+    evaluate_embeddings,
+    create_evaluation_benchmark
+)
+from .benchmarks import (
+    OntologyBenchmarkDatasets,
+    BaselineComparison,
+    setup_benchmark_datasets,
+    compare_with_baselines
+)
 
 __version__ = "0.1.0"
 __all__ = [
@@ -53,5 +64,12 @@ __all__ = [
     "plot_umap_2d",
     "plot_embedding_distribution",
     "create_visualization_comparison",
-    "load_embeddings_for_viz"
+    "load_embeddings_for_viz",
+    "EmbeddingEvaluator",
+    "evaluate_embeddings",
+    "create_evaluation_benchmark",
+    "OntologyBenchmarkDatasets",
+    "BaselineComparison",
+    "setup_benchmark_datasets",
+    "compare_with_baselines"
 ]
