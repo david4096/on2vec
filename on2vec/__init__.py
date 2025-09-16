@@ -17,6 +17,14 @@ from .io import (
     subtract_embedding_vectors,
     get_embedding_vector
 )
+from .visualization import (
+    plot_pca_2d,
+    plot_tsne_2d,
+    plot_umap_2d,
+    plot_embedding_distribution,
+    create_visualization_comparison,
+    load_embeddings_for_viz
+)
 
 __version__ = "0.1.0"
 __all__ = [
@@ -39,5 +47,11 @@ __all__ = [
     "load_embeddings_as_dataframe",
     "add_embedding_vectors",
     "subtract_embedding_vectors",
-    "get_embedding_vector"
+    "get_embedding_vector",
+    "plot_pca_2d",
+    "plot_tsne_2d",
+    "plot_umap_2d",
+    "plot_embedding_distribution",
+    "create_visualization_comparison",
+    "load_embeddings_for_viz"
 ]
