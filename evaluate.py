@@ -2,6 +2,7 @@ from owlready2 import get_ontology
 from sklearn.metrics import roc_auc_score
 import numpy as np
 import pandas as pd
+from scipy.stats import rankdata
 
 def load_ontology(ontology_path):
     """
@@ -15,7 +16,23 @@ def load_ontology(ontology_path):
     """
     return get_ontology(ontology_path).load()
 
-def evaluate_model(y_true, y_pred):
+
+def compute_rank_roc(ranks, n_prots):
+    auc_x = list(ranks.keys())
+    auc_x.sort()
+    auc_y = []
+    tpr = 0
+    sum_rank = sum(ranks.values())
+    for x in auc_x:
+        tpr += ranks[x]
+        auc_y.append(tpr / sum_rank)
+    auc_x.append(n_prots)
+    auc_y.append(1)
+    auc = np.trapz(auc_y, auc_x) / n_prots
+    return auc
+
+
+def evaluate_predictions(pairs, y_true, y_pred):
     """
     Evaluate the performance of a model using various metrics.
     
@@ -26,32 +43,89 @@ def evaluate_model(y_true, y_pred):
     Returns:
     dict: Dictionary containing evaluation metrics.
     """
-    return {
-        "roc_auc": roc_auc_score(y_true, y_pred)
-    }
-
-
-def main():
-    # Example usage
-    ontology_path = "ppi_yeast/test.owl"
-    ontology = load_ontology(ontology_path)
+    top1 = 0
+    top10 = 0
+    top100 = 0
+    mean_rank = 0
+    ftop1 = 0
+    ftop10 = 0
+    ftop100 = 0
+    fmean_rank = 0
+    ranks = {}
+    franks = {}
+    n = len(pairs)
     
-    # Dummy data for evaluation
-    y_true = [0, 1, 1, 1, 1]
-    y_pred = [0.1, 0.9, 0.8, 0.1, 0.95]
+    for c, d in pairs:
+        preds = y_pred[c]
+        rank = rankdata(-preds, method='average')[d]
+        mean_rank += rank
+        if rank <= 1:
+            top1 += 1
+        if rank <= 10:
+            top10 += 1
+        if rank <= 100:
+            top100 += 1
+        if rank not in ranks:
+            ranks[rank] = 0
+        ranks[rank] += 1
+        
+        f_preds = y_pred[c].copy()
+        f_preds[np.where(y_true[c] == 1)] = 0.0
+        f_preds[d] = y_pred[c, d]
+        frank = rankdata(-f_preds, method='average')[d]
+        fmean_rank += frank
+        if frank <= 1:
+            ftop1 += 1
+        if frank <= 10:
+            ftop10 += 1
+        if frank <= 100:
+            ftop100 += 1
+        if frank not in franks:
+            franks[frank] = 0
+        franks[frank] += 1
+    top1 /= n
+    top10 /= n
+    top100 /= n
+    mean_rank /= n
+    ftop1 /= n
+    ftop10 /= n
+    ftop100 /= n
+    fmean_rank /= n
+
+    rank_auc = compute_rank_roc(ranks, len(y_true))
+    frank_auc = compute_rank_roc(franks, len(y_true))
+
+    return {
+        "roc_auc": roc_auc_score(y_true, y_pred),
+        "top1": top1,
+        "top10": top10,
+        "top100": top100,
+        "mean_rank": mean_rank,
+        "rank_auc": rank_auc,
+        "ftop1": ftop1,
+        "ftop10": ftop10,
+        "ftop100": ftop100,
+        "fmean_rank": fmean_rank,
+        "frank_auc": frank_auc
+    }
+    
+def evaluate_embeddings(ontology_path, embeddings_path):
+    # Example usage
+    ontology = load_ontology(ontology_path)
     
     nodes = list(ontology.classes())
     nodes_dict = {node.name: idx for idx, node in enumerate(nodes)}
-    print("Nodes Dictionary:", nodes_dict)
     print("Ontology Classes:", len(nodes))
     edge_types = list(ontology.object_properties())
     y_true = np.zeros((len(nodes), len(nodes)), dtype=np.int32)
+    pairs = []
     for node1 in nodes:
         for node2 in node1.interacts_with:
             y_true[nodes_dict[node1.name], nodes_dict[node2.name]] = 1
+            if node1.name != node2.name:
+                pairs.append((nodes_dict[node1.name], nodes_dict[node2.name]))
     # Load embeddings
-    df = pd.read_parquet("ppi-yeast-embeddings.parquet")
-    print(df.head())
+    df = pd.read_parquet(embeddings_path)
     embeddings = {}
     y_pred = np.zeros((len(nodes), len(nodes)), dtype=np.float32)
     for _, row in df.iterrows():
@@ -64,8 +138,13 @@ def main():
                     emb2 = embeddings[node2.iri]
                     score = np.dot(emb1, emb2) / (np.linalg.norm(emb1) * np.linalg.norm(emb2))
                     y_pred[nodes_dict[node1.name], nodes_dict[node2.name]] = score
-    metrics = evaluate_model(y_true, y_pred)
+    for c in range(len(nodes)):
+        y_pred[c, c] = 0.0  # No self-loops
+        y_true[c, c] = 0.0  # No self-loops
+    metrics = evaluate_predictions(pairs, y_true, y_pred)
     print("Evaluation Metrics:", metrics)
     
 if __name__ == "__main__":
-    main()
+    ontology_path = "ppi_yeast/test.owl"
+    embeddings_path = "ppi-yeast-embeddings.parquet"
+    evaluate_embeddings(ontology_path, embeddings_path)
