@@ -143,6 +143,7 @@ def evaluate_embeddings(ontology_path, embeddings_path):
         y_true[c, c] = 0.0  # No self-loops
     metrics = evaluate_predictions(pairs, y_true, y_pred)
     print("Evaluation Metrics:", metrics)
+    return metrics
     
 if __name__ == "__main__":
     ontology_path = "ppi_yeast/test.owl"
