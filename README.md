@@ -53,6 +53,8 @@ The demo notebook walks through:
 
 #### 1. Train a model (one-time setup):
 ```bash
+curl -LOR http://edamontology.org/EDAM.owl
+
 # Basic GCN model with subclass relations only
 python train.py EDAM.owl --model_type gcn --hidden_dim 128 --out_dim 64 --epochs 100 --model_output edam_model.pt
 
