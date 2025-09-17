@@ -3,6 +3,7 @@ from sklearn.metrics import roc_auc_score
 import numpy as np
 import pandas as pd
 from scipy.stats import rankdata
+from sklearn.metrics.pairwise import cosine_similarity
 
 def load_ontology(ontology_path):
     """
@@ -111,32 +112,29 @@ def evaluate_predictions(pairs, y_true, y_pred):
     
 def evaluate_embeddings(ontology, embeddings_df):
     # Example usage
-    nodes = list(ontology.classes())
-    nodes_dict = {node.name: idx for idx, node in enumerate(nodes)}
+    embeddings_dict = {}
+    for _, row in embeddings_df.iterrows():
+        embeddings_dict[row['node_id']] = np.array(row['embedding'])
+
+    nodes = []
+    for cls in ontology.classes():
+        if hasattr(cls, 'interacts_with') and cls.iri in embeddings_dict:
+            nodes.append(cls)
     print("Ontology Classes:", len(nodes))
-    edge_types = list(ontology.object_properties())
+    nodes_dict = {node.iri: idx for idx, node in enumerate(nodes)}
+    embeds = np.zeros((len(nodes), len(embeddings_df['embedding'].iloc[0])), dtype=np.float32)
+    for idx in range(len(nodes)):
+        embeds[idx] = embeddings_dict[nodes[idx].iri]
     y_true = np.zeros((len(nodes), len(nodes)), dtype=np.int32)
     pairs = []
     for node1 in nodes:
         for node2 in node1.interacts_with:
-            y_true[nodes_dict[node1.name], nodes_dict[node2.name]] = 1
-            if node1.name != node2.name:
-                pairs.append((nodes_dict[node1.name], nodes_dict[node2.name]))
+            if node1.iri != node2.iri:
+                y_true[nodes_dict[node1.iri], nodes_dict[node2.iri]] = 1
+                pairs.append((nodes_dict[node1.iri], nodes_dict[node2.iri]))
     print("Positive pairs:", len(pairs))
-    print("Edge types:", len(edge_types))
     # Load embeddings
-    embeddings = {}
-    y_pred = np.zeros((len(nodes), len(nodes)), dtype=np.float32)
-    for _, row in embeddings_df.iterrows():
-        embeddings[row['node_id']] = np.array(row['embedding'])
-    for node1 in nodes:
-        if node1.iri in embeddings:
-            emb1 = embeddings[node1.iri]
-            for node2 in node1.interacts_with:
-                if node2.iri in embeddings:
-                    emb2 = embeddings[node2.iri]
-                    score = np.dot(emb1, emb2) / (np.linalg.norm(emb1) * np.linalg.norm(emb2))
-                    y_pred[nodes_dict[node1.name], nodes_dict[node2.name]] = score
+    y_pred = cosine_similarity(embeds)
     for c in range(len(nodes)):
         y_pred[c, c] = 0.0  # No self-loops
         y_true[c, c] = 0.0  # No self-loops
@@ -145,8 +143,8 @@ def evaluate_embeddings(ontology, embeddings_df):
     return metrics
     
 if __name__ == "__main__":
-    ontology_path = "ppi_yeast/test.owl"
-    embeddings_path = "ppi-yeast-embeddings.parquet"
+    ontology_path = "ppi_human/test.owl"
+    embeddings_path = "ppi-human-embeddings-cross.parquet"
     ontology = load_ontology(ontology_path)
     embeddings_df = pd.read_parquet(embeddings_path)
     evaluate_embeddings(ontology, embeddings_df)
