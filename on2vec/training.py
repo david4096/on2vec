@@ -42,7 +42,22 @@ def train_model(model, x, edge_index, optimizer, loss_fn, epochs=100, edge_type=
             # Text-augmented model
             if text_x is None:
                 raise ValueError("TextAugmentedOntologyGNN requires text_x features")
-            out = model(x, text_x, edge_index)
+
+            # Handle multi-relation text-augmented models
+            if model.model_type in ['rgcn', 'weighted_gcn', 'heterogeneous']:
+                if edge_type is None:
+                    raise ValueError(f"Text-augmented {model.model_type} model requires edge_type")
+
+                if model.model_type == 'heterogeneous':
+                    # Heterogeneous model needs relation mapping
+                    relation_to_index = {rel: i for i, rel in enumerate(model.relation_types)}
+                    out = model(x, text_x, edge_index, edge_type, relation_to_index)
+                else:
+                    # RGCN or weighted GCN
+                    out = model(x, text_x, edge_index, edge_type)
+            else:
+                # Standard GCN/GAT text-augmented model
+                out = model(x, text_x, edge_index)
         elif hasattr(model, 'num_relations') and edge_type is not None:
             # Multi-relation model
             if hasattr(model, 'relation_types'):
@@ -404,16 +419,42 @@ def train_text_augmented_ontology_embeddings(owl_file, model_output,
 
     logger.info(f"Feature dimensions - Structural: {structural_dim}, Text: {text_dim}")
 
-    # Create text-augmented model
-    model = TextAugmentedOntologyGNN(
-        structural_dim=structural_dim,
-        text_dim=text_dim,
-        hidden_dim=hidden_dim,
-        out_dim=out_dim,
-        model_type=backbone_model,
-        fusion_method=fusion_method,
-        dropout=dropout
-    )
+    # Build graph with multi-relation support if needed
+    relation_data = None
+    if backbone_model in ['rgcn', 'weighted_gcn', 'heterogeneous']:
+        logger.info("Multi-relation model requested, building multi-relation graph...")
+        from .ontology import build_multi_relation_graph_from_owl
+        graph_data = build_multi_relation_graph_from_owl(owl_file)
+        x_structural = graph_data['node_features']
+        edge_index = graph_data['edge_index']
+        edge_type = graph_data['edge_types']
+        class_to_index = graph_data['class_to_index']
+        relation_data = {
+            'relation_to_index': graph_data['relation_to_index'],
+            'relation_names': graph_data['relation_names'],
+            'edge_types': edge_type,
+            'num_relations': len(graph_data['relation_names'])
+        }
+        logger.info(f"Multi-relation graph built with {len(graph_data['relation_names'])} relation types")
+
+    # Create text-augmented model with full multi-relation support
+    model_params = {
+        'structural_dim': structural_dim,
+        'text_dim': text_dim,
+        'hidden_dim': hidden_dim,
+        'out_dim': out_dim,
+        'model_type': backbone_model,
+        'fusion_method': fusion_method,
+        'dropout': dropout
+    }
+
+    # Add multi-relation parameters if needed
+    if backbone_model in ['rgcn', 'weighted_gcn']:
+        model_params['num_relations'] = relation_data['num_relations']
+    elif backbone_model == 'heterogeneous':
+        model_params['relation_types'] = relation_data['relation_names']
+
+    model = TextAugmentedOntologyGNN(**model_params)
 
     optimizer = Adam(model.parameters(), lr=learning_rate)
     loss_fn = get_loss_function(loss_fn_name)
@@ -422,7 +463,9 @@ def train_text_augmented_ontology_embeddings(owl_file, model_output,
     logger.info("Starting training...")
     trained_model = train_model(
         model, x_structural, edge_index, optimizer, loss_fn,
-        epochs=epochs, text_x=x_text
+        epochs=epochs,
+        edge_type=relation_data['edge_types'] if relation_data else None,
+        text_x=x_text
     )
 
     # Save the model with text-specific metadata

@@ -252,7 +252,8 @@ class TextAugmentedOntologyGNN(torch.nn.Module):
     """
 
     def __init__(self, structural_dim, text_dim, hidden_dim, out_dim,
-                 model_type='gcn', fusion_method='concat', dropout=0.0):
+                 model_type='gcn', fusion_method='concat', dropout=0.0,
+                 num_relations=None, relation_types=None, num_bases=None):
         """
         Initialize the Text-Augmented GNN model.
 
@@ -261,9 +262,12 @@ class TextAugmentedOntologyGNN(torch.nn.Module):
             text_dim (int): Dimension of text features
             hidden_dim (int): Hidden layer dimension
             out_dim (int): Output embedding dimension
-            model_type (str): Type of GNN ('gcn', 'gat')
+            model_type (str): Type of GNN ('gcn', 'gat', 'rgcn', 'weighted_gcn', 'heterogeneous')
             fusion_method (str): How to combine features ('concat', 'add', 'attention')
             dropout (float): Dropout rate
+            num_relations (int, optional): Number of relations (for rgcn, weighted_gcn)
+            relation_types (list, optional): List of relation types (for heterogeneous)
+            num_bases (int, optional): Number of bases for RGCN decomposition
         """
         super(TextAugmentedOntologyGNN, self).__init__()
         self.structural_dim = structural_dim
@@ -273,6 +277,8 @@ class TextAugmentedOntologyGNN(torch.nn.Module):
         self.model_type = model_type
         self.fusion_method = fusion_method
         self.dropout = dropout
+        self.num_relations = num_relations
+        self.relation_types = relation_types
 
         # Feature fusion layer
         if fusion_method == 'concat':
@@ -295,19 +301,54 @@ class TextAugmentedOntologyGNN(torch.nn.Module):
         else:
             raise ValueError(f"Unknown fusion method: {fusion_method}")
 
-        # GNN layers
+        # GNN layers - support all model types
         if model_type == 'gcn':
             self.conv1 = GCNConv(self.input_dim, hidden_dim)
             self.conv2 = GCNConv(hidden_dim, out_dim)
+
         elif model_type == 'gat':
             self.conv1 = GATConv(self.input_dim, hidden_dim)
             self.conv2 = GATConv(hidden_dim, out_dim)
+
+        elif model_type == 'rgcn':
+            if num_relations is None:
+                raise ValueError("RGCN model requires num_relations to be specified")
+            self.conv1 = RGCNConv(self.input_dim, hidden_dim, num_relations, num_bases=num_bases)
+            self.conv2 = RGCNConv(hidden_dim, out_dim, num_relations, num_bases=num_bases)
+
+        elif model_type == 'weighted_gcn':
+            if num_relations is None:
+                raise ValueError("Weighted GCN model requires num_relations to be specified")
+            self.conv1 = GCNConv(self.input_dim, hidden_dim)
+            self.conv2 = GCNConv(hidden_dim, out_dim)
+            # Learnable weights for different relation types
+            self.relation_weights = torch.nn.Parameter(torch.ones(num_relations))
+
+        elif model_type == 'heterogeneous':
+            if relation_types is None:
+                raise ValueError("Heterogeneous model requires relation_types to be specified")
+            self.num_relations = len(relation_types)
+            # Separate GCN layers for each relation type
+            self.relation_convs1 = torch.nn.ModuleDict()
+            self.relation_convs2 = torch.nn.ModuleDict()
+
+            for rel_type in relation_types:
+                rel_key = str(rel_type)
+                self.relation_convs1[rel_key] = GCNConv(self.input_dim, hidden_dim)
+                self.relation_convs2[rel_key] = GCNConv(hidden_dim, out_dim)
+
+            # Aggregation layer to combine outputs from different relation types
+            self.aggregation_weights = torch.nn.Parameter(torch.ones(self.num_relations))
+
         else:
-            raise ValueError("Unsupported model type. Use 'gcn' or 'gat'.")
+            raise ValueError(
+                f"Unsupported model type '{model_type}' for TextAugmentedOntologyGNN. "
+                f"Supported types: ['gcn', 'gat', 'rgcn', 'weighted_gcn', 'heterogeneous']"
+            )
 
         logger.info(f"Initialized TextAugmentedOntologyGNN: {fusion_method} fusion, {model_type} backbone")
 
-    def forward(self, structural_x, text_x, edge_index):
+    def forward(self, structural_x, text_x, edge_index, edge_type=None, relation_to_index=None):
         """
         Forward pass combining structural and textual features.
 
@@ -315,6 +356,8 @@ class TextAugmentedOntologyGNN(torch.nn.Module):
             structural_x (torch.Tensor): Structural node features
             text_x (torch.Tensor): Text node features
             edge_index (torch.Tensor): Graph edge indices
+            edge_type (torch.Tensor, optional): Edge type indices (for multi-relation models)
+            relation_to_index (dict, optional): Mapping from relation types to indices
 
         Returns:
             torch.Tensor: Node embeddings
@@ -342,10 +385,73 @@ class TextAugmentedOntologyGNN(torch.nn.Module):
         # Apply dropout
         x = F.dropout(x, p=self.dropout, training=self.training)
 
-        # Apply GNN layers
-        x = self.conv1(x, edge_index)
-        x = F.relu(x)
-        x = F.dropout(x, p=self.dropout, training=self.training)
-        x = self.conv2(x, edge_index)
+        # Apply GNN layers based on model type
+        if self.model_type in ['gcn', 'gat']:
+            # Standard GCN/GAT forward pass
+            x = self.conv1(x, edge_index)
+            x = F.relu(x)
+            x = F.dropout(x, p=self.dropout, training=self.training)
+            x = self.conv2(x, edge_index)
+
+        elif self.model_type == 'rgcn':
+            # RGCN requires edge_type
+            if edge_type is None:
+                raise ValueError("RGCN requires edge_type to be specified")
+            x = self.conv1(x, edge_index, edge_type)
+            x = F.relu(x)
+            x = F.dropout(x, p=self.dropout, training=self.training)
+            x = self.conv2(x, edge_index, edge_type)
+
+        elif self.model_type == 'weighted_gcn':
+            # Weighted GCN applies relation weights to edge features
+            if edge_type is None:
+                raise ValueError("Weighted GCN requires edge_type to be specified")
+
+            # Apply relation weights
+            edge_weights = self.relation_weights[edge_type]
+
+            # Use weighted edges
+            x = self.conv1(x, edge_index, edge_weights)
+            x = F.relu(x)
+            x = F.dropout(x, p=self.dropout, training=self.training)
+            x = self.conv2(x, edge_index, edge_weights)
+
+        elif self.model_type == 'heterogeneous':
+            # Heterogeneous model processes each relation type separately
+            if edge_type is None or relation_to_index is None:
+                raise ValueError("Heterogeneous model requires both edge_type and relation_to_index")
+
+            # Group edges by relation type
+            relation_outputs = []
+
+            for rel_idx, rel_type in enumerate(self.relation_types):
+                rel_key = str(rel_type)
+
+                # Find edges of this relation type
+                mask = edge_type == rel_idx
+                if torch.sum(mask) == 0:
+                    continue  # Skip if no edges of this type
+
+                rel_edge_index = edge_index[:, mask]
+
+                # Apply relation-specific convolutions
+                rel_x = self.relation_convs1[rel_key](x, rel_edge_index)
+                rel_x = F.relu(rel_x)
+                rel_x = F.dropout(rel_x, p=self.dropout, training=self.training)
+                rel_x = self.relation_convs2[rel_key](rel_x, rel_edge_index)
+
+                relation_outputs.append(rel_x)
+
+            if relation_outputs:
+                # Combine outputs from different relation types
+                stacked_outputs = torch.stack(relation_outputs, dim=0)  # [num_relations, num_nodes, out_dim]
+
+                # Apply learnable aggregation weights
+                aggregation_weights = F.softmax(self.aggregation_weights[:len(relation_outputs)], dim=0)
+                x = (stacked_outputs * aggregation_weights.view(-1, 1, 1)).sum(dim=0)
+            else:
+                # Fallback if no relation edges found
+                logger.warning("No relation edges found, using identity mapping")
+                x = torch.zeros(x.size(0), self.out_dim, device=x.device)
 
         return x
