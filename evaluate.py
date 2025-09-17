@@ -109,10 +109,8 @@ def evaluate_predictions(pairs, y_true, y_pred):
         "frank_auc": frank_auc
     }
     
-def evaluate_embeddings(ontology_path, embeddings_path):
+def evaluate_embeddings(ontology, embeddings_df):
     # Example usage
-    ontology = load_ontology(ontology_path)
-    
     nodes = list(ontology.classes())
     nodes_dict = {node.name: idx for idx, node in enumerate(nodes)}
     print("Ontology Classes:", len(nodes))
@@ -125,10 +123,9 @@ def evaluate_embeddings(ontology_path, embeddings_path):
             if node1.name != node2.name:
                 pairs.append((nodes_dict[node1.name], nodes_dict[node2.name]))
     # Load embeddings
-    df = pd.read_parquet(embeddings_path)
     embeddings = {}
     y_pred = np.zeros((len(nodes), len(nodes)), dtype=np.float32)
-    for _, row in df.iterrows():
+    for _, row in embeddings_df.iterrows():
         embeddings[row['node_id']] = np.array(row['embedding'])
     for node1 in nodes:
         if node1.iri in embeddings:
@@ -148,4 +145,6 @@ def evaluate_embeddings(ontology_path, embeddings_path):
 if __name__ == "__main__":
     ontology_path = "ppi_yeast/test.owl"
     embeddings_path = "ppi-yeast-embeddings.parquet"
-    evaluate_embeddings(ontology_path, embeddings_path)
+    ontology = load_ontology(ontology_path)
+    embeddings_df = pd.read_parquet(embeddings_path)
+    evaluate_embeddings(ontology, embeddings_df)
