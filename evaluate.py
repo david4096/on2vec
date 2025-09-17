@@ -122,6 +122,8 @@ def evaluate_embeddings(ontology, embeddings_df):
             y_true[nodes_dict[node1.name], nodes_dict[node2.name]] = 1
             if node1.name != node2.name:
                 pairs.append((nodes_dict[node1.name], nodes_dict[node2.name]))
+    print("Positive pairs:", len(pairs))
+    print("Edge types:", len(edge_types))
     # Load embeddings
     embeddings = {}
     y_pred = np.zeros((len(nodes), len(nodes)), dtype=np.float32)
