@@ -2,19 +2,77 @@ import optuna
 import pandas as pd
 import plotly
 from evaluate import load_ontology, evaluate_embeddings
-from on2vec.training import train_ontology_embeddings
+from on2vec.training import train_ontology_embeddings, train_text_augmented_ontology_embeddings
 from on2vec.embedding import embed_ontology_with_model
 
-def define_objective(trial, owl_file, model_output, epochs = 100, loss_fn_name='triplet', use_multi_relation=False, dropout=0.0, num_bases=None, parquet_file='embeddings.parquet'):
+def train_ontology_embeddings_wrapper(owl_file, 
+        model_output, 
+        model_type, 
+        hidden_dim,
+        out_dim,
+        epochs,
+        loss_fn_name,
+        learning_rate,
+        use_multi_relation,
+        dropout,
+        num_bases = None,
+        include_text_features=False, 
+        text_model_type=None, 
+        text_model_name=None, 
+        fusion_method="concat"):
+    # Wrapper function to train ontology embeddings with fixed parameters
+    model=None
+    if include_text_features:    
+    #    train_text_augmented_ontology_embeddings(owl_file, model_output,
+    #                                       text_model_type='sentence_transformer',
+    #                                       text_model_name='all-MiniLM-L6-v2',
+    #                                       backbone_model='gcn', fusion_method='concat',
+    #                                       hidden_dim=128, out_dim=64,
+    #                                       epochs=100, loss_fn_name='triplet',
+    #                                       learning_rate=0.01, dropout=0.0) """
+        model =train_text_augmented_ontology_embeddings(
+            owl_file=owl_file,
+            model_output=model_output,
+            text_model_type=text_model_type,  # Default text model type, can be changed
+            text_model_name=text_model_name,  # Default text model name, can be changed
+            backbone_model=model_type,  # Default backbone model, can be changed
+            fusion_method=fusion_method,  # Default fusion method, can be changed)
+            hidden_dim=hidden_dim,    # Default hidden dimension, can be changed
+            out_dim=out_dim,       # Default output dimension, can be changed
+            epochs=epochs,
+            loss_fn_name=loss_fn_name,  # Default loss function, can be changed
+            learning_rate=learning_rate,     # Default learning rate, can be changed
+            dropout=dropout)    
+    else: 
+        model=train_ontology_embeddings(
+            owl_file=owl_file,
+            model_output=model_output,
+            model_type=model_type,  # Default model type, can be changed
+            hidden_dim=hidden_dim,    # Default hidden dimension, can be changed
+            out_dim=out_dim,       # Default output dimension, can be changed
+            epochs=epochs,
+            loss_fn_name=loss_fn_name,  # Default loss function, can be changed
+            learning_rate=learning_rate,     # Default learning rate, can be changed
+            use_multi_relation=use_multi_relation,
+            dropout=dropout,
+            num_bases=num_bases)
+    return model
+
+
+
+def define_objective(trial, owl_file, model_output, epochs, use_multi_relation=False, dropout=0.0, num_bases=None, parquet_file='embeddings.parquet', include_text_features=False, fusion_method='concat'):
     # Hyperparameters to optimize
     # Load ontology
     ontology = load_ontology(owl_file)
     hidden_dim = trial.suggest_int("hidden_dim",4, 256)
     out_dim = trial.suggest_int("out_dim", 4, 256)
     learning_rate = trial.suggest_float("learning_rate", 1e-5, 1e-1, log=True)
-    model_type = trial.suggest_categorical("model_type", ['gcn', 'gat'])
-    #loss_fun_nm = trial.suggest_categorical("loss_fun_nm", ['pairwise', 'nll', 'cross_entropy'])
-
+    model_type = trial.suggest_categorical("model_type", ['gcn', 'gat', 'rgcn', 'weighted_gcn', 'heterogeneous'])
+    loss_fn_name = trial.suggest_categorical("loss_fn_name", ['cosine', 'cross_entropy'])
+    text_model_type = None
+    if include_text_features:
+        text_model_type = trial.suggest_categorical("text_model_type", ['sentence_transformer', 'huggingface', 'openai', 'tfidf'])
+    
     # Train embeddings
 
 #   def train_ontology_embeddings(owl_file, model_output, model_type='gcn', hidden_dim=128, out_dim=64,
@@ -34,7 +92,7 @@ def define_objective(trial, owl_file, model_output, epochs = 100, loss_fn_name='
   #      dropout (float): Dropout rate for multi-relation models
   #      num_bases (int, optional): Number of bases for RGCN decomposition
 #"""
-    model = train_ontology_embeddings(
+    model = train_ontology_embeddings_wrapper(
         owl_file=owl_file, 
         model_output=model_output, 
         model_type=model_type, 
@@ -45,7 +103,11 @@ def define_objective(trial, owl_file, model_output, epochs = 100, loss_fn_name='
         learning_rate=learning_rate,
         use_multi_relation=use_multi_relation,
         dropout=dropout,
-        num_bases=num_bases)
+        num_bases=num_bases,
+        include_text_features=include_text_features,
+        text_model_type=text_model_type,
+        text_model_name='all-MiniLM-L6-v2' if text_model_type == 'sentence_transformer' else 'bert-base-uncased',
+        fusion_method=fusion_method)
     
     embeddings = embed_ontology_with_model(owl_file=owl_file, 
                               model_path=model_output,
@@ -61,18 +123,20 @@ def define_objective(trial, owl_file, model_output, epochs = 100, loss_fn_name='
 
     return roc_auc, mean_rank
 study = optuna.create_study(directions=["maximize", "minimize"])
-study.optimize(lambda trial: define_objective(trial, owl_file='test.owl', model_output='model.pth', epochs=10, loss_fn_name='triplet', use_multi_relation=True, dropout=0.2, num_bases=5, parquet_file='embeddings.parquet'), n_trials=50)
+study.optimize(lambda trial: define_objective(trial, owl_file='test.owl', model_output='model.pth', epochs=10, use_multi_relation=True, dropout=0.0, num_bases=5, parquet_file='embeddings.parquet',include_text_features=True,fusion_method='concat'), n_trials=50)
 optuna.visualization.plot_pareto_front(study, target_names=["roc_auc", "mean_rank"])  
 print(f"Number of trials on the Pareto front: {len(study.best_trials)}")
-
+# Print details of the trial with the highest accuracy
 trial_with_highest_accuracy = max(study.best_trials, key=lambda t: t.values[1])
 print("Trial with highest accuracy: ")
 print(f"\tnumber: {trial_with_highest_accuracy.number}")
 print(f"\tparams: {trial_with_highest_accuracy.params}")
 print(f"\tvalues: {trial_with_highest_accuracy.values}")
+#Plot of hyperparameter importance for roc_auc
 optuna.visualization.plot_param_importances(
     study, target=lambda t: t.values[0], target_name="roc_auc"
 )
+#Plot of hyperparameter importance for mean_rank
 optuna.visualization.plot_param_importances(
     study, target=lambda t: t.values[0], target_name="mean_rank"
 )
