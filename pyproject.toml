@@ -44,6 +44,7 @@ dependencies = [
     "pyyaml>=6.0.0",
     "huggingface-hub>=0.15.0",
     "twine>=6.2.0",
+    "mteb>=1.38.54",
 ]
 
 [project.scripts]

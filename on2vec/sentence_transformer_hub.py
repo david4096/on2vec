@@ -278,7 +278,12 @@ class OntologyFusionModule(nn.Module):
 
                 # Weight by similarity scores
                 scores = np.array(scores)
-                weights = scores / scores.sum()  # Normalize weights
+                scores_sum = scores.sum()
+                if scores_sum > 0:
+                    weights = scores / scores_sum  # Normalize weights
+                else:
+                    # If all scores are 0, use uniform weights
+                    weights = np.ones(len(scores)) / len(scores)
 
                 # Weighted average of structural embeddings
                 weighted_struct = np.average(struct_embeds, axis=0, weights=weights)
