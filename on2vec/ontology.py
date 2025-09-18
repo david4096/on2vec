@@ -2,6 +2,7 @@
 OWL ontology processing utilities
 """
 
+import os
 import torch
 from owlready2 import get_ontology
 import logging
@@ -25,7 +26,33 @@ def build_graph_from_owl(owl_file):
     logger.info(f"Loading OWL ontology from {owl_file}")
 
     try:
-        ontology = get_ontology(owl_file).load()
+        # Try different approaches to load the ontology
+        ontology_iri = f"file://{os.path.abspath(owl_file)}"
+
+        # First, try the standard approach
+        try:
+            ontology = get_ontology(owl_file).load()
+        except Exception as first_error:
+            logger.warning(f"Standard loading failed for {owl_file}: {first_error}")
+
+            # Try loading with file:// IRI
+            try:
+                ontology = get_ontology(ontology_iri).load()
+            except Exception as second_error:
+                logger.warning(f"IRI loading failed for {owl_file}: {second_error}")
+
+                # Try loading into a new world to isolate any conflicts
+                from owlready2 import World
+                world = World()
+                try:
+                    ontology = world.get_ontology(owl_file).load()
+                except Exception as third_error:
+                    logger.error(f"All loading attempts failed for {owl_file}")
+                    logger.error(f"  Standard: {first_error}")
+                    logger.error(f"  IRI: {second_error}")
+                    logger.error(f"  New world: {third_error}")
+                    raise third_error
+
         logger.info(f"Successfully loaded ontology: {owl_file}")
     except Exception as e:
         logger.error(f"Failed to load ontology: {owl_file}. Error: {e}")
@@ -92,7 +119,33 @@ def build_multi_relation_graph_from_owl(owl_file, include_subclass=True):
     logger.info(f"Loading OWL ontology with all relations from {owl_file}")
 
     try:
-        ontology = get_ontology(owl_file).load()
+        # Try different approaches to load the ontology
+        ontology_iri = f"file://{os.path.abspath(owl_file)}"
+
+        # First, try the standard approach
+        try:
+            ontology = get_ontology(owl_file).load()
+        except Exception as first_error:
+            logger.warning(f"Standard loading failed for {owl_file}: {first_error}")
+
+            # Try loading with file:// IRI
+            try:
+                ontology = get_ontology(ontology_iri).load()
+            except Exception as second_error:
+                logger.warning(f"IRI loading failed for {owl_file}: {second_error}")
+
+                # Try loading into a new world to isolate any conflicts
+                from owlready2 import World
+                world = World()
+                try:
+                    ontology = world.get_ontology(owl_file).load()
+                except Exception as third_error:
+                    logger.error(f"All loading attempts failed for {owl_file}")
+                    logger.error(f"  Standard: {first_error}")
+                    logger.error(f"  IRI: {second_error}")
+                    logger.error(f"  New world: {third_error}")
+                    raise third_error
+
         logger.info(f"Successfully loaded ontology: {owl_file}")
     except Exception as e:
         logger.error(f"Failed to load ontology: {owl_file}. Error: {e}")

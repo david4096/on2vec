@@ -9,10 +9,12 @@ on2vec converts OWL ontologies into graph representations and learns node embedd
 ## Features
 
 - **Two-Phase Workflow**: Separate training and embedding steps for efficiency
-- **Multiple GNN Models**: Support for GCN and GAT architectures
+- **Multiple GNN Models**: Support for GCN, GAT, RGCN, and heterogeneous architectures
+- **Text-Augmented Embeddings**: NEW! Combine structural and semantic text features with separate storage
+- **Multi-Relation Support**: Capture all ObjectProperty relations, not just subclass hierarchies
 - **Various Loss Functions**: Triplet, contrastive, cosine, and cross-entropy losses
 - **Model Checkpointing**: Save and reuse trained models across different ontologies
-- **Rich Metadata**: Parquet files include comprehensive metadata about source ontologies
+- **Rich Parquet Output**: Multiple embedding types (fused, text-only, structural-only) with comprehensive metadata
 - **Package Structure**: Importable Python modules with CLI scripts
 
 ## Installation
@@ -32,20 +34,9 @@ uv sync --extra notebook
 source .venv/bin/activate
 ```
 
-### Jupyter Notebook Demo
+### Interactive Examples
 
-For an interactive demonstration, check out the included notebook:
-
-```bash
-# Start Jupyter Lab
-jupyter lab on2vec_demo.ipynb
-```
-
-The demo notebook walks through:
-- Downloading a real ontology (Cardiovascular Disease Ontology)
-- Training a GNN model
-- Generating and analyzing embeddings
-- Vector operations and format conversion
+The toolkit includes comprehensive CLI and Python API examples. For interactive exploration, you can create your own Jupyter notebooks using the provided Python API.
 
 ## Quick Start
 
@@ -83,11 +74,17 @@ python main.py EDAM.owl --model_type gcn --hidden_dim 128 --out_dim 64 --epochs 
 # Skip training and use existing model
 python main.py EDAM.owl --skip_training --model_output edam_model.pt --output embeddings.parquet
 
-# NEW: Text-augmented embeddings with semantic features
+# NEW: Text-augmented embeddings with semantic features (stores fused + separate text/structural embeddings)
 python main.py EDAM.owl --use_text_features --text_model_type sentence_transformer --text_model_name all-MiniLM-L6-v2 --fusion_method concat --output text_embeddings.parquet
 
 # Use different text models and fusion methods
 python main.py EDAM.owl --use_text_features --text_model_type huggingface --text_model_name bert-base-uncased --fusion_method attention --output bert_embeddings.parquet
+
+# The resulting parquet files contain 4 columns:
+# - node_id: Ontology class IRIs
+# - embedding: Fused embeddings (structural + text combined)
+# - text_embedding: Pure text embeddings for semantic similarity
+# - structural_embedding: Pure structural embeddings for graph analysis
 ```
 
 ### Using as Python Package
@@ -133,6 +130,58 @@ embeddings = embed_ontology_with_model(
 inspect_parquet_metadata("embeddings.parquet")
 df = load_embeddings_as_dataframe("embeddings.parquet")
 result_vector = add_embedding_vectors("embeddings.parquet", "Class1", "embeddings.parquet", "Class2")
+```
+
+### Working with Multi-Embedding Parquet Files
+
+Text-augmented models generate Parquet files with **multiple embedding types** for flexible analysis:
+
+#### Understanding Multi-Embedding Structure
+```python
+import polars as pl
+from on2vec import inspect_parquet_metadata
+
+# Load and inspect a text-augmented embedding file
+df = pl.read_parquet("text_embeddings.parquet")
+print(f"Columns: {df.columns}")
+# Output: ['node_id', 'embedding', 'text_embedding', 'structural_embedding']
+
+# Check embedding dimensions
+print(f"Fused embeddings: {len(df['embedding'][0])} dimensions")      # e.g., 64 dims
+print(f"Text embeddings: {len(df['text_embedding'][0])} dimensions")  # e.g., 384 dims
+print(f"Structural: {len(df['structural_embedding'][0])} dimensions") # e.g., 64 dims
+
+# View comprehensive metadata including text model info
+metadata = inspect_parquet_metadata("text_embeddings.parquet")
+```
+
+#### Using Different Embedding Types
+```python
+import numpy as np
+from sklearn.metrics.pairwise import cosine_similarity
+
+# Load the embedding file
+df = pl.read_parquet("text_embeddings.parquet")
+
+# Extract different embedding types
+fused_embeds = np.stack(df['embedding'].to_list())           # Best overall performance
+text_embeds = np.stack(df['text_embedding'].to_list())       # Pure semantic similarity
+struct_embeds = np.stack(df['structural_embedding'].to_list()) # Pure graph relationships
+
+# Compare semantic vs structural similarity for two concepts
+concept1_idx, concept2_idx = 0, 100
+
+# Semantic similarity (using text embeddings)
+text_sim = cosine_similarity([text_embeds[concept1_idx]], [text_embeds[concept2_idx]])[0][0]
+print(f"Semantic similarity: {text_sim:.3f}")
+
+# Structural similarity (using structural embeddings)
+struct_sim = cosine_similarity([struct_embeds[concept1_idx]], [struct_embeds[concept2_idx]])[0][0]
+print(f"Structural similarity: {struct_sim:.3f}")
+
+# Combined similarity (using fused embeddings)
+fused_sim = cosine_similarity([fused_embeds[concept1_idx]], [fused_embeds[concept2_idx]])[0][0]
+print(f"Fused similarity: {fused_sim:.3f}")
 ```
 
 ### Working with Embedding Files
@@ -522,7 +571,6 @@ report_path = evaluator.create_cross_domain_report(results)
   - **DataFrame Integration**: Polars DataFrame loading with metadata preservation
   - **Vector Arithmetic**: Add and subtract embedding vectors for semantic operations
 - **Dual Interface**: CLI scripts and importable Python modules
-- **Jupyter Integration**: Interactive demonstration notebook with real ontology examples
 - **Comprehensive Evaluation**: NEW! Complete evaluation framework with intrinsic, extrinsic, and ontology-specific metrics ✅
   - **Benchmark Datasets**: 10+ curated ontology datasets across multiple domains (GO, ChEBI, HP, etc.)
   - **Baseline Comparisons**: Compare against random, structural, Node2Vec, DeepWalk baselines
@@ -557,7 +605,6 @@ on2vec/
 ├── evaluate_embeddings.py # 🆕 CLI: Evaluation framework
 ├── benchmark_datasets.py  # 🆕 CLI: Benchmark management
 ├── cross_domain_evaluation.py # 🆕 CLI: Cross-domain testing
-├── on2vec_demo.ipynb   # 📓 Interactive Jupyter demo
 └── pyproject.toml      # Package configuration
 ```
 
@@ -580,9 +627,9 @@ on2vec/
 
 ## Getting Started
 
-1. **Try the interactive demo:** Open `on2vec_demo.ipynb` in Jupyter Lab for a complete walkthrough
-2. **CLI workflow:** Use the two-phase train → embed approach for production workflows
-3. **Python integration:** Import on2vec modules for custom analysis pipelines
+1. **CLI workflow:** Use the two-phase train → embed approach for production workflows
+2. **Python integration:** Import on2vec modules for custom analysis pipelines
+3. **Text-augmented models:** Use `--use_text_features` for semantic embeddings with multiple embedding types
 
 ## License
 

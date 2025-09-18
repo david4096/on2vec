@@ -107,11 +107,19 @@ def save_model_checkpoint(model, class_to_index, output_path, relation_data=None
     node_ids = [cls.iri for cls in class_to_index.keys()]
 
     # Base model config
-    # For heterogeneous models, detect from class name
-    if isinstance(model, HeterogeneousOntologyGNN):
+    # Detect model type from class name
+    if isinstance(model, TextAugmentedOntologyGNN):
+        model_type = 'text_augmented'
+        backbone_model = getattr(model, 'model_type', 'gcn')  # The backbone GNN type
+    elif isinstance(model, HeterogeneousOntologyGNN):
         model_type = 'heterogeneous'
+        backbone_model = None
+    elif isinstance(model, MultiRelationOntologyGNN):
+        model_type = getattr(model, 'model_type', 'rgcn')  # rgcn or weighted_gcn
+        backbone_model = None
     else:
-        model_type = getattr(model, 'model_type', 'unknown')
+        model_type = getattr(model, 'model_type', 'gcn')  # Standard models
+        backbone_model = None
 
     model_config = {
         'model_type': model_type,
@@ -119,6 +127,18 @@ def save_model_checkpoint(model, class_to_index, output_path, relation_data=None
         'hidden_dim': getattr(model, 'hidden_dim', None),
         'out_dim': getattr(model, 'out_dim', None)
     }
+
+    # Add backbone model for text-augmented models
+    if backbone_model is not None:
+        model_config['backbone_model'] = backbone_model
+
+    # Add text-augmented specific config
+    if isinstance(model, TextAugmentedOntologyGNN):
+        model_config['structural_dim'] = getattr(model, 'structural_dim', None)
+        model_config['text_dim'] = getattr(model, 'text_dim', None)
+        model_config['fusion_method'] = getattr(model, 'fusion_method', 'concat')
+        model_config['text_model_type'] = getattr(model, 'text_model_type', 'unknown')
+        model_config['text_model_name'] = getattr(model, 'text_model_name', 'unknown')
 
     # Add multi-relation specific config
     if hasattr(model, 'num_relations'):
@@ -171,6 +191,8 @@ def load_model_checkpoint(checkpoint_path):
     # Recreate the appropriate model based on type
     if model_type in ['rgcn', 'weighted_gcn']:
         # Multi-relation model
+        if 'num_relations' not in config:
+            raise ValueError(f"{model_type} model requires num_relations in checkpoint config")
         model = MultiRelationOntologyGNN(
             input_dim=config['input_dim'],
             hidden_dim=config['hidden_dim'],
@@ -197,7 +219,10 @@ def load_model_checkpoint(checkpoint_path):
             out_dim=config['out_dim'],
             model_type=config.get('backbone_model', 'gcn'),
             fusion_method=config.get('fusion_method', 'concat'),
-            dropout=config.get('dropout', 0.0)
+            dropout=config.get('dropout', 0.0),
+            num_relations=config.get('num_relations'),
+            relation_types=config.get('relation_types'),
+            num_bases=config.get('num_bases')
         )
     elif model_type in ['gcn', 'gat']:
         # Standard model (gcn, gat)
@@ -208,7 +233,29 @@ def load_model_checkpoint(checkpoint_path):
             model_type=model_type
         )
     else:
-        raise ValueError(f"Unsupported model type: {model_type}. Supported types: gcn, gat, rgcn, weighted_gcn, heterogeneous, text_augmented")
+        # Handle legacy or incorrectly named model types
+        if model_type.startswith('text_'):
+            # Legacy text-augmented models that were incorrectly named
+            backbone = model_type.replace('text_', '')
+            if backbone in ['gcn', 'gat', 'rgcn', 'weighted_gcn']:
+                logger.warning(f"Found legacy model type '{model_type}', interpreting as text_augmented with {backbone} backbone")
+                # Try to construct a TextAugmentedOntologyGNN
+                model = TextAugmentedOntologyGNN(
+                    structural_dim=config.get('structural_dim', config['input_dim']),
+                    text_dim=config.get('text_dim', 0),
+                    hidden_dim=config['hidden_dim'],
+                    out_dim=config['out_dim'],
+                    model_type=backbone,
+                    fusion_method=config.get('fusion_method', 'concat'),
+                    dropout=config.get('dropout', 0.0),
+                    num_relations=config.get('num_relations'),
+                    relation_types=config.get('relation_types'),
+                    num_bases=config.get('num_bases')
+                )
+            else:
+                raise ValueError(f"Unsupported legacy model type: {model_type}")
+        else:
+            raise ValueError(f"Unsupported model type: {model_type}. Supported types: gcn, gat, rgcn, weighted_gcn, heterogeneous, text_augmented")
 
     # Load the trained weights
     model.load_state_dict(checkpoint['model_state_dict'])
@@ -456,6 +503,10 @@ def train_text_augmented_ontology_embeddings(owl_file, model_output,
 
     model = TextAugmentedOntologyGNN(**model_params)
 
+    # Add text model information as attributes for later retrieval
+    model.text_model_type = text_model_type
+    model.text_model_name = text_model_name
+
     optimizer = Adam(model.parameters(), lr=learning_rate)
     loss_fn = get_loss_function(loss_fn_name)
 
@@ -484,6 +535,14 @@ def train_text_augmented_ontology_embeddings(owl_file, model_output,
         'text_model_type': text_model_type,
         'text_model_name': text_model_name
     }
+
+    # Add multi-relation specific config if applicable
+    if backbone_model in ['rgcn', 'weighted_gcn', 'heterogeneous'] and relation_data:
+        if backbone_model in ['rgcn', 'weighted_gcn']:
+            model_config['num_relations'] = relation_data.get('num_relations')
+        elif backbone_model == 'heterogeneous':
+            model_config['relation_types'] = relation_data.get('relation_names')
+            model_config['num_relations'] = len(relation_data.get('relation_names', []))
 
     # Extract node IDs (IRIs) from class_to_index
     node_ids = [cls.iri for cls in class_to_index.keys()]
