@@ -290,8 +290,8 @@ If you use on2vec in your research, please cite:
 ```bibtex
 @software{on2vec2025,
   title={on2vec: Ontology Embeddings with Graph Neural Networks},
-  author={David Gonzalez-Alonzo},
+  author={David Steinberg},
   year={2025},
-  url={https://github.com/davidgonzalezalonzo/on2vec}
+  url={https://github.com/david4096/on2vec}
 }
 ```
