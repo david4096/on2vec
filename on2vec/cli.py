@@ -126,9 +126,37 @@ def setup_hf_parser(subparsers):
     hf_parser.add_argument('--base-model', help='Base sentence transformer model')
     hf_parser.add_argument('--fusion', choices=['concat', 'attention', 'gated', 'weighted_avg'],
                            default='concat', help='Fusion method for combining embeddings')
-    hf_parser.add_argument('--epochs', type=int, default=100, help='Training epochs')
     hf_parser.add_argument('--skip-training', action='store_true', help='Skip training step')
     hf_parser.add_argument('--skip-testing', action='store_true', help='Skip testing step')
+
+    # Training configuration
+    training_group = hf_parser.add_argument_group('Training Configuration')
+    training_group.add_argument('--epochs', type=int, default=100, help='Training epochs')
+    training_group.add_argument('--model-type', choices=['gcn', 'gat', 'rgcn', 'heterogeneous'],
+                               default='gcn', help='GNN model architecture')
+    training_group.add_argument('--hidden-dim', type=int, default=128, help='Hidden layer dimensions')
+    training_group.add_argument('--out-dim', type=int, default=64, help='Output embedding dimensions')
+    training_group.add_argument('--loss-fn', choices=['triplet', 'contrastive', 'cosine', 'cross_entropy'],
+                               default='triplet', help='Loss function')
+    training_group.add_argument('--use-multi-relation', action='store_true',
+                               help='Include all ObjectProperty relations')
+    training_group.add_argument('--text-model', help='Text model for semantic features (overrides base-model for training)')
+
+    # Model details configuration
+    details_group = hf_parser.add_argument_group('Model Details')
+    details_group.add_argument('--author', help='Model author name')
+    details_group.add_argument('--author-email', help='Model author email')
+    details_group.add_argument('--description', help='Custom model description')
+    details_group.add_argument('--domain', help='Ontology domain (auto-detected if not specified)')
+    details_group.add_argument('--license', default='apache-2.0', help='Model license')
+    details_group.add_argument('--tags', nargs='+', help='Additional custom tags')
+
+    # HuggingFace upload options
+    upload_group = hf_parser.add_argument_group('HuggingFace Upload')
+    upload_group.add_argument('--upload', action='store_true', help='Automatically upload to HuggingFace Hub')
+    upload_group.add_argument('--hub-name', help='HuggingFace Hub model name (e.g., username/model-name)')
+    upload_group.add_argument('--private', action='store_true', help='Make the uploaded model private')
+    upload_group.add_argument('--commit-message', help='Commit message for upload')
 
 
 def setup_hf_train_parser(subparsers):
@@ -163,6 +191,20 @@ def setup_hf_create_parser(subparsers):
     hf_create_parser.add_argument('--fusion', choices=['concat', 'attention', 'gated', 'weighted_avg'],
                                   default='concat', help='Fusion method')
     hf_create_parser.add_argument('--ontology', help='Original ontology file (for model card generation)')
+
+    # Model details configuration
+    hf_create_parser.add_argument('--author', help='Model author name')
+    hf_create_parser.add_argument('--author-email', help='Model author email')
+    hf_create_parser.add_argument('--description', help='Custom model description')
+    hf_create_parser.add_argument('--domain', help='Ontology domain (auto-detected if not specified)')
+    hf_create_parser.add_argument('--license', default='apache-2.0', help='Model license')
+    hf_create_parser.add_argument('--tags', nargs='+', help='Additional custom tags')
+
+    # HuggingFace upload options
+    hf_create_parser.add_argument('--upload', action='store_true', help='Automatically upload to HuggingFace Hub')
+    hf_create_parser.add_argument('--hub-name', help='HuggingFace Hub model name (e.g., username/model-name)')
+    hf_create_parser.add_argument('--private', action='store_true', help='Make the uploaded model private')
+    hf_create_parser.add_argument('--commit-message', help='Commit message for upload')
 
 
 def setup_hf_test_parser(subparsers):
@@ -315,6 +357,43 @@ def run_hf_command(args):
     """Execute the HuggingFace end-to-end command."""
     from .huggingface_workflows import end_to_end_workflow
 
+    # Build training configuration
+    training_config = {
+        'epochs': args.epochs,
+        'model_type': args.model_type,
+        'hidden_dim': args.hidden_dim,
+        'out_dim': args.out_dim,
+        'loss_fn': args.loss_fn,
+        'use_multi_relation': args.use_multi_relation,
+    }
+
+    # Use text-model if specified, otherwise use base-model
+    text_model = args.text_model or args.base_model or "all-MiniLM-L6-v2"
+    training_config['text_model'] = text_model
+
+    # Build model details
+    model_details = {}
+    if args.author:
+        model_details['author'] = args.author
+    if args.author_email:
+        model_details['author_email'] = args.author_email
+    if args.description:
+        model_details['description'] = args.description
+    if args.domain:
+        model_details['domain'] = args.domain
+    if args.license:
+        model_details['license'] = args.license
+    if args.tags:
+        model_details['tags'] = args.tags
+
+    # Build upload options
+    upload_options = {}
+    if args.upload:
+        upload_options['upload'] = True
+        upload_options['hub_name'] = args.hub_name or f"your-username/{args.model_name}"
+        upload_options['private'] = args.private
+        upload_options['commit_message'] = args.commit_message
+
     try:
         success = end_to_end_workflow(
             owl_file=args.ontology,
@@ -322,9 +401,11 @@ def run_hf_command(args):
             output_dir=args.output_dir,
             base_model=args.base_model or "all-MiniLM-L6-v2",
             fusion_method=args.fusion,
-            epochs=args.epochs,
             skip_training=args.skip_training,
-            skip_testing=args.skip_testing
+            skip_testing=args.skip_testing,
+            training_config=training_config,
+            model_details=model_details,
+            upload_options=upload_options
         )
         return 0 if success else 1
     except Exception as e:
@@ -356,6 +437,29 @@ def run_hf_create_command(args):
     """Execute the HuggingFace create command."""
     from .huggingface_workflows import create_hf_model
 
+    # Build model details
+    model_details = {}
+    if args.author:
+        model_details['author'] = args.author
+    if args.author_email:
+        model_details['author_email'] = args.author_email
+    if args.description:
+        model_details['description'] = args.description
+    if args.domain:
+        model_details['domain'] = args.domain
+    if args.license:
+        model_details['license'] = args.license
+    if args.tags:
+        model_details['tags'] = args.tags
+
+    # Build upload options
+    upload_options = {}
+    if args.upload:
+        upload_options['upload'] = True
+        upload_options['hub_name'] = args.hub_name or f"your-username/{args.model_name}"
+        upload_options['private'] = args.private
+        upload_options['commit_message'] = args.commit_message
+
     try:
         model_path = create_hf_model(
             embeddings_file=args.embeddings,
@@ -363,7 +467,9 @@ def run_hf_create_command(args):
             output_dir=args.output_dir,
             base_model=args.base_model,
             fusion_method=args.fusion,
-            ontology_file=args.ontology
+            ontology_file=args.ontology,
+            model_details=model_details,
+            upload_options=upload_options
         )
         print(f"✅ HuggingFace model created: {model_path}")
         return 0

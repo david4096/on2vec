@@ -27,7 +27,8 @@ def train_ontology_with_text(
     model_type: str = "gcn",
     hidden_dim: int = 128,
     out_dim: int = 64,
-    loss_fn: str = "triplet"
+    loss_fn: str = "triplet",
+    use_multi_relation: bool = False
 ) -> bool:
     """Train an ontology model with text features enabled."""
     print(f"🧬 Training ontology model: {owl_file}")
@@ -48,7 +49,8 @@ def train_ontology_with_text(
             loss_fn=loss_fn,
             use_text_features=True,
             text_model_name=text_model,
-            fusion_method="concat"
+            fusion_method="concat",
+            use_multi_relation=use_multi_relation
         )
 
         print("✅ Training completed successfully!")
@@ -92,7 +94,9 @@ def create_hf_model(
     fusion_method: str = "concat",
     validate_first: bool = True,
     ontology_file: Optional[str] = None,
-    training_config: Optional[Dict[str, Any]] = None
+    training_config: Optional[Dict[str, Any]] = None,
+    model_details: Optional[Dict[str, Any]] = None,
+    upload_options: Optional[Dict[str, Any]] = None
 ) -> str:
     """Create HuggingFace compatible model."""
     print(f"🏗️ Creating HuggingFace model: {model_name}")
@@ -138,7 +142,7 @@ def create_hf_model(
 
         print(f"✅ Model created successfully: {model_path}")
 
-        # Generate model card
+        # Generate model card with enhanced details
         print("📄 Generating model card...")
         create_model_card(
             model_path=model_path,
@@ -149,12 +153,27 @@ def create_hf_model(
             training_config=training_config
         )
 
-        # Generate upload instructions
-        print("📤 Generating upload instructions...")
-        create_upload_instructions(
-            model_path=model_path,
-            model_name=model_name
-        )
+        # Handle upload if requested
+        if upload_options and upload_options.get('upload'):
+            print("🚀 Uploading to HuggingFace Hub...")
+            success = upload_to_hf_hub(
+                model_path=model_path,
+                hub_name=upload_options.get('hub_name', f'your-username/{model_name}'),
+                private=upload_options.get('private', False),
+                commit_message=upload_options.get('commit_message')
+            )
+            if success:
+                print(f"✅ Model uploaded successfully to {upload_options.get('hub_name')}")
+            else:
+                print("⚠️  Upload failed, but model was created locally")
+        else:
+            # Generate upload instructions
+            print("📤 Generating upload instructions...")
+            create_upload_instructions(
+                model_path=model_path,
+                model_name=model_name,
+                hub_name=upload_options.get('hub_name') if upload_options else None
+            )
 
         return model_path
 
@@ -207,7 +226,43 @@ def validate_hf_model(model_path: str, test_queries: Optional[List[str]] = None)
         return False
 
 
-def show_upload_instructions(model_path: str, model_name: str):
+def upload_to_hf_hub(
+    model_path: str,
+    hub_name: str,
+    private: bool = False,
+    commit_message: Optional[str] = None
+) -> bool:
+    """Upload model to HuggingFace Hub."""
+    try:
+        from sentence_transformers import SentenceTransformer
+
+        # Load the model
+        model = SentenceTransformer(model_path)
+
+        # Set commit message
+        if not commit_message:
+            commit_message = f"Upload {Path(model_path).name} model created with on2vec"
+
+        # Push to hub
+        model.push_to_hub(
+            repo_id=hub_name,
+            private=private,
+            commit_message=commit_message
+        )
+
+        print(f"✅ Model successfully uploaded to: https://huggingface.co/{hub_name}")
+        return True
+
+    except ImportError:
+        print("❌ Upload failed: huggingface_hub not installed. Install with: pip install huggingface_hub")
+        return False
+    except Exception as e:
+        print(f"❌ Upload failed: {e}")
+        logger.error(f"Upload failed: {e}")
+        return False
+
+
+def show_upload_instructions(model_path: str, model_name: str, hub_name: Optional[str] = None):
     """Show instructions for uploading to HuggingFace Hub."""
     print("\n🌐 HuggingFace Hub Upload Instructions")
     print("=" * 50)
@@ -255,9 +310,11 @@ def end_to_end_workflow(
     embeddings_file: Optional[str] = None,
     base_model: str = "all-MiniLM-L6-v2",
     fusion_method: str = "concat",
-    epochs: int = 100,
     skip_training: bool = False,
-    skip_testing: bool = False
+    skip_testing: bool = False,
+    training_config: Optional[Dict[str, Any]] = None,
+    model_details: Optional[Dict[str, Any]] = None,
+    upload_options: Optional[Dict[str, Any]] = None
 ) -> bool:
     """Run the complete end-to-end workflow."""
     print("🚀 Starting End-to-End Workflow")
@@ -276,10 +333,40 @@ def end_to_end_workflow(
 
         if not skip_training:
             print("📚 Step 1: Training ontology model with text features")
-            if not train_ontology_with_text(owl_file, embeddings_file, base_model, epochs):
+
+            # Extract training parameters
+            train_epochs = training_config.get('epochs', 100) if training_config else 100
+            train_model_type = training_config.get('model_type', 'gcn') if training_config else 'gcn'
+            train_hidden_dim = training_config.get('hidden_dim', 128) if training_config else 128
+            train_out_dim = training_config.get('out_dim', 64) if training_config else 64
+            train_loss_fn = training_config.get('loss_fn', 'triplet') if training_config else 'triplet'
+            train_use_multi_relation = training_config.get('use_multi_relation', False) if training_config else False
+            train_text_model = training_config.get('text_model', base_model) if training_config else base_model
+
+            if not train_ontology_with_text(
+                owl_file=owl_file,
+                output_file=embeddings_file,
+                text_model=train_text_model,
+                epochs=train_epochs,
+                model_type=train_model_type,
+                hidden_dim=train_hidden_dim,
+                out_dim=train_out_dim,
+                loss_fn=train_loss_fn,
+                use_multi_relation=train_use_multi_relation
+            ):
                 return False
         else:
             print("📚 Step 1: Skipping training (using existing embeddings)")
+
+            # Still create training_config for model card if not provided
+            if not training_config:
+                training_config = {
+                    'model_type': 'gcn',
+                    'epochs': 100,
+                    'hidden_dim': 128,
+                    'out_dim': 64,
+                    'loss_fn': 'triplet'
+                }
 
         # Step 2: Validate embeddings
         print("\n🔍 Step 2: Validating embeddings")
@@ -295,15 +382,6 @@ def end_to_end_workflow(
         # If user didn't specify base_model in e2e, let create_hf_model auto-detect
         create_base_model = base_model if base_model != 'all-MiniLM-L6-v2' else None
 
-        # Prepare training config for model card
-        training_config = {
-            'model_type': 'gcn',  # Default - could be enhanced to detect from embeddings
-            'epochs': epochs,
-            'hidden_dim': 128,  # Default values - could be enhanced
-            'out_dim': 64,
-            'loss_fn': 'triplet'
-        }
-
         model_path = create_hf_model(
             embeddings_file=embeddings_file,
             model_name=model_name,
@@ -312,7 +390,9 @@ def end_to_end_workflow(
             fusion_method=fusion_method,
             validate_first=False,  # Already validated
             ontology_file=owl_file,
-            training_config=training_config
+            training_config=training_config,
+            model_details=model_details,
+            upload_options=upload_options
         )
 
         # Step 4: Test model (if not skipping)
@@ -323,9 +403,10 @@ def end_to_end_workflow(
         else:
             print(f"\n🧪 Step 4: Skipping model testing")
 
-        # Step 5: Show upload instructions
-        print(f"\n📤 Step 5: Upload preparation")
-        show_upload_instructions(model_path, model_name)
+        # Step 5: Show upload instructions (if not uploaded automatically)
+        if not (upload_options and upload_options.get('upload')):
+            print(f"\n📤 Step 5: Upload preparation")
+            show_upload_instructions(model_path, model_name)
 
         print("\n" + "=" * 50)
         print("✅ End-to-End Workflow Completed Successfully!")
