@@ -12,60 +12,82 @@ The integration allows you to:
 
 ## Quick Start
 
-### 1. Generate Ontology Embeddings
+### Option 1: One-Command Workflow (Recommended)
 
-First, train an on2vec model with text features enabled:
+Create a complete HuggingFace model in one command:
 
 ```bash
-# Train text-augmented model on your ontology
-uv run python main.py your_ontology.owl \
-    --use_text_features \
-    --text_model_type sentence_transformer \
-    --text_model_name all-MiniLM-L6-v2 \
+# Complete end-to-end workflow
+uv run python create_hf_model.py e2e biomedical.owl my-biomedical-model
+```
+
+This single command:
+1. ✅ Trains ontology with text features
+2. ✅ Generates multi-embedding files
+3. ✅ Creates HuggingFace compatible model
+4. ✅ Tests the model
+5. ✅ Shows upload instructions
+
+### Option 2: Step-by-Step Workflow
+
+#### Step 1: Train Ontology Model
+
+```bash
+# Train with custom configuration
+uv run python create_hf_model.py train biomedical.owl \
     --output embeddings.parquet \
-    --epochs 100
+    --text-model all-MiniLM-L6-v2 \
+    --epochs 100 \
+    --model-type gcn \
+    --hidden-dim 128 \
+    --out-dim 64
 ```
 
-This creates a parquet file containing:
-- **Fused embeddings**: Combined text + structural knowledge
-- **Text embeddings**: Pure semantic text features (384 dims)
-- **Structural embeddings**: Pure ontology graph features (varies)
-- **Metadata**: Model info, ontology details, text model used
-
-### 2. Create Sentence Transformers Model
-
-Use the CLI tool to create and test your model:
+#### Step 2: Create HuggingFace Model
 
 ```bash
-# Create and test both model types
-uv run python create_ontology_sentence_transformer.py embeddings.parquet \
-    --demo both \
-    --save-model saved_models
+# Create model from embeddings
+uv run python create_hf_model.py create embeddings.parquet my-model \
+    --fusion concat \
+    --base-model all-MiniLM-L6-v2 \
+    --output-dir ./hf_models
 ```
 
-### 3. Build HuggingFace Compatible Model
+#### Step 3: Test Model
+
+```bash
+# Test the created model
+uv run python create_hf_model.py test ./hf_models/my-model
+```
+
+#### Step 4: Get Upload Instructions
+
+```bash
+# Show how to upload to HuggingFace Hub
+uv run python create_hf_model.py upload-info ./hf_models/my-model my-model
+```
+
+### Option 3: Programmatic API
 
 ```python
-from on2vec.sentence_transformer_hub import create_hf_model
+from on2vec.sentence_transformer_hub import create_and_save_hf_model
 
-# Create a proper HF sentence-transformers model
-model = create_hf_model(
+# Create model programmatically
+model_path = create_and_save_hf_model(
     ontology_embeddings_file="embeddings.parquet",
     model_name="my-ontology-model",
+    output_dir="./models",
     fusion_method="concat"
 )
-
-# Save for HuggingFace Hub
-model.save("./my-ontology-model")
 ```
 
-### 4. Use with Standard sentence-transformers
+### Using Your Model
 
 ```python
 from sentence_transformers import SentenceTransformer
 
 # Load your custom model
-model = SentenceTransformer("./my-ontology-model")
+model = SentenceTransformer("./hf_models/my-model")
 
 # Use like any sentence transformer
 sentences = ["heart disease", "cardiovascular problems", "protein folding"]
@@ -360,12 +382,171 @@ model = create_retrieval_model_with_ontology(
 - **Large Scale**: Consider Query/Document architecture
 - **Memory**: Set `top_k_matches=3` for large ontologies
 
+## CLI Reference
+
+### create_hf_model.py - Main CLI Tool
+
+Complete command-line interface for creating HuggingFace models:
+
+#### Available Commands
+
+```bash
+# See all commands
+python create_hf_model.py --help
+
+# Command-specific help
+python create_hf_model.py e2e --help
+python create_hf_model.py train --help
+python create_hf_model.py create --help
+```
+
+#### Command Reference
+
+**End-to-End Workflow**
+```bash
+python create_hf_model.py e2e OWL_FILE MODEL_NAME [options]
+
+# Options:
+  --output-dir DIR          # Output directory (default: ./hf_models)
+  --base-model MODEL        # Base transformer (default: all-MiniLM-L6-v2)
+  --fusion METHOD           # Fusion method (concat/weighted_avg/attention/gated)
+  --epochs N                # Training epochs (default: 100)
+  --skip-training           # Use existing embeddings
+  --skip-testing            # Skip model validation
+```
+
+**Training Only**
+```bash
+python create_hf_model.py train OWL_FILE --output PARQUET_FILE [options]
+
+# Options:
+  --text-model MODEL        # Text model (default: all-MiniLM-L6-v2)
+  --epochs N                # Training epochs (default: 100)
+  --model-type TYPE         # GNN type (gcn/gat/rgcn)
+  --hidden-dim N            # Hidden dimensions (default: 128)
+  --out-dim N               # Output dimensions (default: 64)
+  --loss-fn LOSS            # Loss function (triplet/contrastive/cosine)
+```
+
+**Model Creation Only**
+```bash
+python create_hf_model.py create EMBEDDINGS_FILE MODEL_NAME [options]
+
+# Options:
+  --output-dir DIR          # Output directory
+  --base-model MODEL        # Base transformer model
+  --fusion METHOD           # Fusion method
+  --no-validate             # Skip embeddings validation
+```
+
+**Model Testing**
+```bash
+python create_hf_model.py test MODEL_PATH [options]
+
+# Options:
+  --queries "query1" "query2"  # Custom test queries
+```
+
+**Validation & Upload Info**
+```bash
+# Validate embeddings file
+python create_hf_model.py validate EMBEDDINGS_FILE
+
+# Show upload instructions
+python create_hf_model.py upload-info MODEL_PATH MODEL_NAME
+```
+
+### batch_hf_models.py - Batch Processing
+
+Process multiple ontologies or configurations:
+
+#### Batch Processing
+```bash
+python batch_hf_models.py process OWL_DIR OUTPUT_DIR [options]
+
+# Options:
+  --base-models MODEL1 MODEL2     # Multiple base models
+  --fusion-methods METHOD1 METHOD2 # Multiple fusion methods
+  --epochs N1 N2                  # Multiple epoch counts
+  --max-workers N                 # Parallel processing
+  --limit N                       # Limit number of files
+  --force-retrain                 # Force retraining
+```
+
+#### Model Collections
+```bash
+# Create curated model collection
+python batch_hf_models.py collection RESULTS_FILE --name COLLECTION_NAME
+
+# Options:
+  --criteria best_test/fastest/smallest  # Selection criteria
+  --output-dir DIR                       # Output directory
+```
+
+#### Results Analysis
+```bash
+# Show batch processing summary
+python batch_hf_models.py summary RESULTS_FILE
+```
+
+### Example Workflows
+
+**Single Model Creation**
+```bash
+# Quick biomedical model
+python create_hf_model.py e2e biomedical.owl biomedical-embedder
+
+# Advanced configuration
+python create_hf_model.py e2e ontology.owl custom-model \
+  --base-model all-mpnet-base-v2 \
+  --fusion gated \
+  --epochs 200 \
+  --output-dir ./production_models
+```
+
+**Batch Processing**
+```bash
+# Process directory with multiple configurations
+python batch_hf_models.py process owl_files/ ./batch_output \
+  --base-models all-MiniLM-L6-v2 all-mpnet-base-v2 \
+  --fusion-methods concat gated attention \
+  --epochs 50 100 \
+  --max-workers 4
+
+# Create collection from results
+python batch_hf_models.py collection ./batch_output/batch_results.json \
+  --name "biomedical-collection" \
+  --criteria best_test
+```
+
+**Custom Training Pipeline**
+```bash
+# Step 1: Custom training
+python create_hf_model.py train ontology.owl \
+  --output custom_embeddings.parquet \
+  --text-model sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2 \
+  --epochs 150 \
+  --model-type gat \
+  --hidden-dim 256
+
+# Step 2: Create multiple fusion variants
+python create_hf_model.py create custom_embeddings.parquet model-concat --fusion concat
+python create_hf_model.py create custom_embeddings.parquet model-gated --fusion gated
+python create_hf_model.py create custom_embeddings.parquet model-attention --fusion attention
+
+# Step 3: Test all variants
+python create_hf_model.py test ./hf_models/model-concat
+python create_hf_model.py test ./hf_models/model-gated
+python create_hf_model.py test ./hf_models/model-attention
+```
+
 ## Next Steps
 
-1. **Train your model**: Follow the quick start with your ontology
-2. **Experiment with fusion methods**: Try different approaches for your domain
-3. **Evaluate performance**: Compare against baseline models
-4. **Share on Hub**: Upload successful models for community use
-5. **Integrate in applications**: Use with existing sentence-transformers workflows
+1. **Start with CLI**: Use `create_hf_model.py e2e` for your first model
+2. **Experiment with fusion**: Try different fusion methods for your domain
+3. **Batch process**: Use `batch_hf_models.py` for multiple ontologies
+4. **Create collections**: Curate your best models for sharing
+5. **Upload to Hub**: Share successful models with the community
+6. **Integrate in apps**: Use with existing sentence-transformers workflows
 
 For more examples and advanced usage, see the `examples/` directory and the comprehensive test suite.

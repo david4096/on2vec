@@ -1,21 +1,84 @@
 # on2vec
 
-A toolkit for generating vector embeddings from OWL ontologies using Graph Neural Networks (GNNs).
+A toolkit for generating vector embeddings from OWL ontologies using Graph Neural Networks (GNNs), with **HuggingFace Sentence Transformers integration**.
 
 ## Overview
 
-on2vec converts OWL ontologies into graph representations and learns node embeddings using various GNN architectures (GCN, GAT) and loss functions. The toolkit uses a two-phase approach: first train a model, then generate embeddings for any ontology using the trained model.
+on2vec converts OWL ontologies into graph representations and learns node embeddings using various GNN architectures (GCN, GAT) and loss functions. The toolkit now features **one-command HuggingFace model creation** for seamless integration with the sentence-transformers ecosystem.
+
+## 🚀 New: HuggingFace Integration
+
+Create production-ready Sentence Transformers models with ontology knowledge in **one command**:
+
+```bash
+# Complete end-to-end workflow
+python create_hf_model.py e2e biomedical.owl my-biomedical-model
+```
+
+This automatically:
+1. ✅ Trains ontology with text features
+2. ✅ Creates HuggingFace compatible model
+3. ✅ Tests model functionality
+4. ✅ Prepares for Hub upload
+
+**Use like any sentence transformer:**
+```python
+from sentence_transformers import SentenceTransformer
+model = SentenceTransformer('./hf_models/my-biomedical-model')
+embeddings = model.encode(['heart disease', 'cardiovascular problems'])
+```
+
+[📚 **See CLI Quick Reference**](CLI_QUICK_REFERENCE.md) | [📖 **Full HF Documentation**](docs/sentence_transformers_integration.md)
+
+## 📋 Table of Contents
+
+- [🚀 HuggingFace Quick Start](#-new-huggingface-integration)
+- [📥 Installation](#installation)
+- [🔧 CLI Commands](#cli-commands)
+- [💻 Original on2vec Usage](#quick-start)
+- [🏗️ Model Architecture](#model-architecture)
+- [📊 Output Formats](#output-formats)
+- [📚 Documentation](#documentation)
+
+## 🔧 CLI Commands
+
+### HuggingFace Model Creation
+```bash
+# One-command model creation
+python create_hf_model.py e2e ontology.owl model-name
+
+# Step-by-step workflow
+python create_hf_model.py train ontology.owl --output embeddings.parquet
+python create_hf_model.py create embeddings.parquet model-name
+python create_hf_model.py test ./hf_models/model-name
+
+# Batch processing
+python batch_hf_models.py process owl_files/ ./output --max-workers 4
+```
+
+### Original on2vec Commands
+```bash
+# Basic training
+python main.py ontology.owl --model_type gcn --epochs 100
+
+# Text-augmented training (for HF integration)
+python main.py ontology.owl --use_text_features --output embeddings.parquet
+
+# Multi-relation models
+python main.py ontology.owl --use_multi_relation --model_type rgcn
+```
 
 ## Features
 
-- **Two-Phase Workflow**: Separate training and embedding steps for efficiency
-- **Multiple GNN Models**: Support for GCN, GAT, RGCN, and heterogeneous architectures
-- **Text-Augmented Embeddings**: NEW! Combine structural and semantic text features with separate storage
-- **Multi-Relation Support**: Capture all ObjectProperty relations, not just subclass hierarchies
-- **Various Loss Functions**: Triplet, contrastive, cosine, and cross-entropy losses
-- **Model Checkpointing**: Save and reuse trained models across different ontologies
-- **Rich Parquet Output**: Multiple embedding types (fused, text-only, structural-only) with comprehensive metadata
-- **Package Structure**: Importable Python modules with CLI scripts
+- **🤗 HuggingFace Integration**: One-command creation of sentence-transformers models
+- **🔧 Comprehensive CLI**: End-to-end workflows and batch processing tools
+- **📊 Multi-Embedding Support**: Fused, text-only, and structural-only embeddings
+- **🧠 Multiple GNN Models**: Support for GCN, GAT, RGCN, and heterogeneous architectures
+- **📝 Text-Augmented Embeddings**: Combine structural and semantic text features
+- **🔗 Multi-Relation Support**: Capture all ObjectProperty relations
+- **⚡ Various Loss Functions**: Triplet, contrastive, cosine, and cross-entropy losses
+- **💾 Model Checkpointing**: Save and reuse trained models across ontologies
+- **🗂️ Rich Parquet Output**: Comprehensive metadata and multiple embedding types
 
 ## Installation
 
