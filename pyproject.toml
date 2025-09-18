@@ -5,10 +5,10 @@ description = "Generate vector embeddings from OWL ontologies using Graph Neural
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [
-    {name = "David Gonzalez-Alonzo", email = "david@example.com"}
+    {name = "David Steinberg", email = "david@resium.com"}
 ]
 maintainers = [
-    {name = "David Gonzalez-Alonzo", email = "david@example.com"}
+    {name = "David Steinberg", email = "david@resium.com"}
 ]
 license = {text = "MIT"}
 keywords = ["ontology", "embeddings", "graph-neural-networks", "owl", "machine-learning", "huggingface", "sentence-transformers", "mteb"]
@@ -50,10 +50,10 @@ dependencies = [
 on2vec = "on2vec.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/davidgonzalezalonzo/on2vec"
-Repository = "https://github.com/davidgonzalezalonzo/on2vec"
-Issues = "https://github.com/davidgonzalezalonzo/on2vec/issues"
-Documentation = "https://github.com/davidgonzalezalonzo/on2vec/blob/main/README.md"
+Homepage = "https://github.com/david4096/on2vec"
+Repository = "https://github.com/david4096/on2vec"
+Issues = "https://github.com/david4096/on2vec/issues"
+Documentation = "https://github.com/david4096/on2vec/blob/main/README.md"
 
 [project.optional-dependencies]
 dev = [
