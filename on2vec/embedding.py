@@ -25,9 +25,10 @@ def generate_embeddings_from_model(model, x, edge_index, new_to_training_idx=Non
         text_x (torch.Tensor, optional): Text features for TextAugmentedOntologyGNN
 
     Returns:
-        tuple: (embeddings, used_node_ids)
+        tuple: (embeddings, used_node_ids, extra_info)
             - embeddings (torch.Tensor): Generated embeddings
             - used_node_ids (list): Node IDs corresponding to embeddings
+            - extra_info (dict): Additional information including separate embeddings
     """
     logger.info("Generating embeddings...")
 
@@ -36,11 +37,62 @@ def generate_embeddings_from_model(model, x, edge_index, new_to_training_idx=Non
         # Forward pass - handle different model types
         from .models import TextAugmentedOntologyGNN
 
+        # Initialize extra info dictionary
+        extra_info = {
+            'text_embeddings': None,
+            'structural_embeddings': None,
+            'text_model_info': None,
+            'embedding_types': ['fused']  # Always have fused embeddings
+        }
+
         if isinstance(model, TextAugmentedOntologyGNN):
-            # Text-augmented model
+            # Text-augmented model - we can extract separate embeddings
             if text_x is None:
-                raise ValueError("TextAugmentedOntologyGNN requires text_x features")
-            all_embeddings = model(x, text_x, edge_index)
+                # Generate zero text features as fallback for inference
+                logger.warning("TextAugmentedOntologyGNN: No text features provided, using zero features as fallback")
+                text_x = torch.zeros((x.shape[0], model.text_dim), dtype=x.dtype, device=x.device)
+
+            # For text-augmented models, we want to capture intermediate embeddings
+            # First, get structural embeddings (without text)
+            zero_text = torch.zeros_like(text_x)
+
+            # Handle multi-relation text-augmented models
+            if hasattr(model, 'num_relations') and edge_type is not None:
+                if hasattr(model, 'relation_types') and relation_to_index is not None:
+                    # Heterogeneous text-augmented model
+                    all_embeddings = model(x, text_x, edge_index, edge_type, relation_to_index)
+                    structural_only = model(x, zero_text, edge_index, edge_type, relation_to_index)
+                else:
+                    # RGCN or weighted GCN text-augmented model
+                    all_embeddings = model(x, text_x, edge_index, edge_type)
+                    structural_only = model(x, zero_text, edge_index, edge_type)
+            else:
+                # Standard text-augmented model
+                all_embeddings = model(x, text_x, edge_index)
+                structural_only = model(x, zero_text, edge_index)
+
+            # Store separate embeddings
+            extra_info['structural_embeddings'] = structural_only
+            extra_info['embedding_types'].extend(['structural', 'text'])
+
+            # Generate pure text embeddings - just use the provided text features
+            if text_x is not None:
+                # The text_x already contains the text embeddings from the text model
+                extra_info['text_embeddings'] = text_x
+                logger.info(f"Captured separate text embeddings with dimension {text_x.shape[1]}")
+
+            # Store text model information if available (from model attributes or config)
+            text_model_info = None
+            if hasattr(model, 'text_model_type') and hasattr(model, 'text_model_name'):
+                text_model_info = {
+                    'model_type': model.text_model_type,
+                    'model_name': model.text_model_name,
+                    'text_dim': getattr(model, 'text_dim', text_x.shape[1] if text_x is not None else None)
+                }
+
+            if text_model_info:
+                extra_info['text_model_info'] = text_model_info
+
         elif hasattr(model, 'num_relations') and edge_type is not None:
             # Multi-relation model
             if hasattr(model, 'relation_types') and relation_to_index is not None:
@@ -67,18 +119,32 @@ def generate_embeddings_from_model(model, x, edge_index, new_to_training_idx=Non
 
             if aligned_embeddings:
                 embeddings_tensor = torch.stack(aligned_embeddings)
+
+                # Also align the extra embeddings if they exist
+                if extra_info['text_embeddings'] is not None:
+                    aligned_text = []
+                    for new_idx, _ in new_to_training_idx.items():
+                        aligned_text.append(extra_info['text_embeddings'][new_idx])
+                    extra_info['text_embeddings'] = torch.stack(aligned_text) if aligned_text else None
+
+                if extra_info['structural_embeddings'] is not None:
+                    aligned_structural = []
+                    for new_idx, _ in new_to_training_idx.items():
+                        aligned_structural.append(extra_info['structural_embeddings'][new_idx])
+                    extra_info['structural_embeddings'] = torch.stack(aligned_structural) if aligned_structural else None
+
                 logger.info(f"Generated {embeddings_tensor.shape[0]} aligned embeddings of dimension {embeddings_tensor.shape[1]}")
-                return embeddings_tensor, aligned_node_ids
+                return embeddings_tensor, aligned_node_ids, extra_info
             else:
                 logger.error("No aligned embeddings found!")
-                return None, []
+                return None, [], extra_info
         else:
             # Return all embeddings
             if node_ids is None:
                 node_ids = [f"node_{i}" for i in range(all_embeddings.shape[0])]
 
             logger.info(f"Generated {all_embeddings.shape[0]} embeddings of dimension {all_embeddings.shape[1]}")
-            return all_embeddings, node_ids
+            return all_embeddings, node_ids, extra_info
 
 
 def embed_ontology_with_model(model_path, owl_file, output_file=None):
@@ -104,7 +170,8 @@ def embed_ontology_with_model(model_path, owl_file, output_file=None):
     model_config = checkpoint['model_config']
     use_multi_relation = (
         model_config.get('use_multi_relation', False) or
-        model_config.get('model_type') in ['rgcn', 'weighted_gcn', 'heterogeneous']
+        model_config.get('model_type') in ['rgcn', 'weighted_gcn', 'heterogeneous'] or
+        model_config.get('backbone_model') in ['rgcn', 'weighted_gcn', 'heterogeneous']
     )
 
     # Build graph from the new OWL file
@@ -144,10 +211,18 @@ def embed_ontology_with_model(model_path, owl_file, output_file=None):
         }
 
     # Generate embeddings
-    embeddings, node_ids = generate_embeddings_from_model(
+    embeddings, node_ids, extra_info = generate_embeddings_from_model(
         model, x, edge_index, new_to_training_idx, training_node_ids,
         edge_type=edge_type, relation_to_index=relation_to_index
     )
+
+    # Add text model info from checkpoint if not already present
+    if extra_info.get('text_model_info') is None and 'text_model_type' in model_config:
+        extra_info['text_model_info'] = {
+            'model_type': model_config.get('text_model_type', 'unknown'),
+            'model_name': model_config.get('text_model_name', 'unknown'),
+            'text_dim': model_config.get('text_dim')
+        }
 
     result = {
         'embeddings': embeddings,
@@ -164,10 +239,16 @@ def embed_ontology_with_model(model_path, owl_file, output_file=None):
         metadata = create_embedding_metadata(
             owl_file=owl_file,
             model_config=checkpoint['model_config'],
-            alignment_info=alignment_info
+            alignment_info=alignment_info,
+            text_model_info=extra_info.get('text_model_info'),
+            embedding_types=extra_info.get('embedding_types', ['fused'])
         )
 
-        save_embeddings_to_parquet(embeddings, node_ids, output_file, metadata=metadata)
+        save_embeddings_to_parquet(
+            embeddings, node_ids, output_file, metadata=metadata,
+            text_embeddings=extra_info.get('text_embeddings'),
+            structural_embeddings=extra_info.get('structural_embeddings')
+        )
         result['output_file'] = output_file
         result['metadata'] = metadata
 
@@ -194,7 +275,8 @@ def embed_same_ontology(model_path, owl_file, output_file=None):
     model_config = checkpoint['model_config']
     use_multi_relation = (
         model_config.get('use_multi_relation', False) or
-        model_config.get('model_type') in ['rgcn', 'weighted_gcn', 'heterogeneous']
+        model_config.get('model_type') in ['rgcn', 'weighted_gcn', 'heterogeneous'] or
+        model_config.get('backbone_model') in ['rgcn', 'weighted_gcn', 'heterogeneous']
     )
 
     # Check if model is text-augmented
@@ -256,11 +338,19 @@ def embed_same_ontology(model_path, owl_file, output_file=None):
             raise ValueError(f"Text-augmented model requires text features, but generation failed: {e}")
 
     # Generate embeddings (no alignment needed)
-    embeddings, node_ids = generate_embeddings_from_model(
+    embeddings, node_ids, extra_info = generate_embeddings_from_model(
         model, x, edge_index, node_ids=training_node_ids,
         edge_type=edge_type, relation_to_index=relation_to_index,
         text_x=text_x
     )
+
+    # Add text model info from checkpoint if not already present
+    if extra_info.get('text_model_info') is None and 'text_model_type' in model_config:
+        extra_info['text_model_info'] = {
+            'model_type': model_config.get('text_model_type', 'unknown'),
+            'model_name': model_config.get('text_model_name', 'unknown'),
+            'text_dim': model_config.get('text_dim')
+        }
 
     result = {
         'embeddings': embeddings,
@@ -281,10 +371,16 @@ def embed_same_ontology(model_path, owl_file, output_file=None):
         metadata = create_embedding_metadata(
             owl_file=owl_file,
             model_config=checkpoint['model_config'],
-            alignment_info=result['alignment_info']
+            alignment_info=result['alignment_info'],
+            text_model_info=extra_info.get('text_model_info'),
+            embedding_types=extra_info.get('embedding_types', ['fused'])
         )
 
-        save_embeddings_to_parquet(embeddings, node_ids, output_file, metadata=metadata)
+        save_embeddings_to_parquet(
+            embeddings, node_ids, output_file, metadata=metadata,
+            text_embeddings=extra_info.get('text_embeddings'),
+            structural_embeddings=extra_info.get('structural_embeddings')
+        )
         result['output_file'] = output_file
         result['metadata'] = metadata
 

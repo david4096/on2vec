@@ -11,22 +11,27 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def save_embeddings_to_parquet(embeddings, node_ids, output_file, metadata=None):
+def save_embeddings_to_parquet(embeddings, node_ids, output_file, metadata=None,
+                               text_embeddings=None, structural_embeddings=None,
+                               additional_vectors=None):
     """
-    Save embeddings to a Parquet file with optional metadata.
+    Save embeddings to a Parquet file with optional metadata and additional vectors.
 
     Args:
-        embeddings (torch.Tensor): Tensor containing embeddings
+        embeddings (torch.Tensor): Tensor containing main/fused embeddings
         node_ids (list): List of node identifiers
         output_file (str): Path to output Parquet file
         metadata (dict, optional): Metadata about the ontology and model
+        text_embeddings (torch.Tensor, optional): Text-only embeddings
+        structural_embeddings (torch.Tensor, optional): Structure-only embeddings
+        additional_vectors (dict, optional): Dict of {name: tensor} for additional vectors
 
     Returns:
         None
     """
     logger.info(f"Saving embeddings to Parquet file: {output_file}")
 
-    # Convert embeddings tensor to a Python list
+    # Convert main embeddings tensor to a Python list
     embeddings_list = embeddings.cpu().tolist()
 
     # Ensure we have the right number of node IDs
@@ -40,8 +45,38 @@ def save_embeddings_to_parquet(embeddings, node_ids, output_file, metadata=None)
             for i in range(len(embeddings_list) - len(node_ids)):
                 node_ids.append(f"node_{len(node_ids) + i}")
 
-    # Create a Polars DataFrame
+    # Create a Polars DataFrame with main embedding
     data = {'node_id': node_ids, 'embedding': embeddings_list}
+
+    # Add text embeddings if provided
+    if text_embeddings is not None:
+        text_embeddings_list = text_embeddings.cpu().tolist()
+        if len(text_embeddings_list) == len(node_ids):
+            data['text_embedding'] = text_embeddings_list
+            logger.info(f"Added text embeddings with dimension {len(text_embeddings_list[0]) if text_embeddings_list else 0}")
+        else:
+            logger.warning(f"Text embeddings length mismatch: {len(text_embeddings_list)} != {len(node_ids)}")
+
+    # Add structural embeddings if provided
+    if structural_embeddings is not None:
+        structural_embeddings_list = structural_embeddings.cpu().tolist()
+        if len(structural_embeddings_list) == len(node_ids):
+            data['structural_embedding'] = structural_embeddings_list
+            logger.info(f"Added structural embeddings with dimension {len(structural_embeddings_list[0]) if structural_embeddings_list else 0}")
+        else:
+            logger.warning(f"Structural embeddings length mismatch: {len(structural_embeddings_list)} != {len(node_ids)}")
+
+    # Add any additional vectors
+    if additional_vectors:
+        for vector_name, vector_tensor in additional_vectors.items():
+            if vector_tensor is not None:
+                vector_list = vector_tensor.cpu().tolist()
+                if len(vector_list) == len(node_ids):
+                    data[f'{vector_name}_embedding'] = vector_list
+                    logger.info(f"Added {vector_name} embeddings with dimension {len(vector_list[0]) if vector_list else 0}")
+                else:
+                    logger.warning(f"{vector_name} embeddings length mismatch: {len(vector_list)} != {len(node_ids)}")
+
     df = pl.DataFrame(data)
 
     # Convert to Arrow Table
@@ -249,7 +284,9 @@ def load_embeddings(input_file, format=None):
 
 
 
-def create_embedding_metadata(owl_file, model_config=None, alignment_info=None, additional_info=None):
+def create_embedding_metadata(owl_file, model_config=None, alignment_info=None,
+                            additional_info=None, text_model_info=None,
+                            embedding_types=None):
     """
     Create metadata dictionary for embedding files.
 
@@ -258,6 +295,8 @@ def create_embedding_metadata(owl_file, model_config=None, alignment_info=None, 
         model_config (dict, optional): Model configuration information
         alignment_info (dict, optional): Ontology alignment information
         additional_info (dict, optional): Additional metadata
+        text_model_info (dict, optional): Text embedding model information
+        embedding_types (list, optional): List of embedding types stored in file
 
     Returns:
         dict: Metadata dictionary
@@ -277,6 +316,14 @@ def create_embedding_metadata(owl_file, model_config=None, alignment_info=None, 
 
     if alignment_info:
         metadata['alignment_info'] = alignment_info
+
+    if text_model_info:
+        metadata['text_model_info'] = text_model_info
+        logger.info(f"Added text model info: {text_model_info}")
+
+    if embedding_types:
+        metadata['embedding_types'] = embedding_types
+        logger.info(f"Recorded embedding types: {embedding_types}")
 
     if additional_info:
         metadata.update(additional_info)
