@@ -36,6 +36,7 @@ dependencies = [
     "sentence-transformers>=2.2.0",
     "transformers>=4.21.0",
     "seaborn>=0.12.0",
+    "pyyaml>=6.0.2",
 ]
 
 [project.scripts]
