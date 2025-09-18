@@ -237,6 +237,50 @@ def setup_hf_batch_parser(subparsers):
                                  help='Fusion methods to test')
     hf_batch_parser.add_argument('--max-workers', type=int, default=2, help='Parallel workers')
 
+    # Processing options
+    hf_batch_parser.add_argument('--force-retrain', action='store_true',
+                                 help='Force retraining even if embeddings exist')
+    hf_batch_parser.add_argument('--owl-pattern', default='*.owl',
+                                 help='Pattern for finding OWL files')
+    hf_batch_parser.add_argument('--limit', type=int,
+                                 help='Limit number of OWL files to process')
+
+    # Training configuration
+    training_group = hf_batch_parser.add_argument_group('Training Configuration')
+    training_group.add_argument('--epochs', nargs='+', type=int, default=[100],
+                               help='Training epochs to test (can specify multiple)')
+    training_group.add_argument('--model-type', choices=['gcn', 'gat', 'rgcn', 'heterogeneous'],
+                               default='gcn', help='GNN model architecture')
+    training_group.add_argument('--hidden-dim', type=int, default=128, help='Hidden layer dimensions')
+    training_group.add_argument('--out-dim', type=int, default=64, help='Output embedding dimensions')
+    training_group.add_argument('--loss-fn', choices=['triplet', 'contrastive', 'cosine', 'cross_entropy'],
+                               default='triplet', help='Loss function')
+    training_group.add_argument('--use-multi-relation', action='store_true',
+                               help='Include all ObjectProperty relations')
+    training_group.add_argument('--text-model', help='Text model for semantic features (overrides base-model for training)')
+
+    # Model details configuration
+    details_group = hf_batch_parser.add_argument_group('Model Details')
+    details_group.add_argument('--author', help='Model author name')
+    details_group.add_argument('--author-email', help='Model author email')
+    details_group.add_argument('--description', help='Custom model description template (use {ontology_name} placeholder)')
+    details_group.add_argument('--domain', help='Ontology domain (auto-detected if not specified)')
+    details_group.add_argument('--license', default='apache-2.0', help='Model license')
+    details_group.add_argument('--tags', nargs='+', help='Additional custom tags')
+
+    # HuggingFace upload options
+    upload_group = hf_batch_parser.add_argument_group('HuggingFace Upload')
+    upload_group.add_argument('--upload', action='store_true', help='Automatically upload to HuggingFace Hub')
+    upload_group.add_argument('--hub-name-template', help='HuggingFace Hub model name template (e.g., username/{ontology_name}-{config_id})')
+    upload_group.add_argument('--private', action='store_true', help='Make the uploaded models private')
+    upload_group.add_argument('--commit-message', help='Commit message template for uploads')
+
+    # Collection creation options
+    collection_group = hf_batch_parser.add_argument_group('Collection Creation')
+    collection_group.add_argument('--create-collection', help='Create model collection with this name')
+    collection_group.add_argument('--collection-criteria', choices=['best_test', 'fastest', 'smallest'],
+                                  default='best_test', help='Selection criteria for collection')
+
 
 def setup_evaluate_parser(subparsers):
     """Set up the evaluate command parser."""
@@ -556,15 +600,98 @@ def run_hf_test_command(args):
 
 def run_hf_batch_command(args):
     """Execute the HuggingFace batch command."""
-    from batch_hf_models import batch_process_ontologies
+    from pathlib import Path
+    import logging
 
-    return batch_process_ontologies(
-        input_dir=args.input_dir,
-        output_dir=args.output_dir,
-        base_models=args.base_models,
-        fusion_methods=args.fusion_methods,
-        max_workers=args.max_workers
-    )
+    # Set up logging
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+    logger = logging.getLogger(__name__)
+
+    # Build training configuration
+    training_config = {
+        'model_type': args.model_type,
+        'hidden_dim': args.hidden_dim,
+        'out_dim': args.out_dim,
+        'loss_fn': args.loss_fn,
+        'use_multi_relation': args.use_multi_relation,
+    }
+
+    # Use text-model if specified, otherwise use base-models
+    if args.text_model:
+        training_config['text_model'] = args.text_model
+
+    # Build model details
+    model_details = {}
+    if args.author:
+        model_details['author'] = args.author
+    if args.author_email:
+        model_details['author_email'] = args.author_email
+    if args.description:
+        model_details['description'] = args.description
+    if args.domain:
+        model_details['domain'] = args.domain
+    if args.license:
+        model_details['license'] = args.license
+    if args.tags:
+        model_details['tags'] = args.tags
+
+    # Build upload options
+    upload_options = {}
+    if args.upload:
+        upload_options['upload'] = True
+        upload_options['hub_name_template'] = args.hub_name_template or "your-username/{ontology_name}-{config_id}"
+        upload_options['private'] = args.private
+        upload_options['commit_message'] = args.commit_message
+
+    # Build collection options
+    collection_options = {}
+    if args.create_collection:
+        collection_options['name'] = args.create_collection
+        collection_options['criteria'] = args.collection_criteria
+
+    try:
+        # Log what advanced features are enabled
+        if upload_options and upload_options.get('upload'):
+            logger.info("Upload to HuggingFace Hub enabled")
+        if model_details:
+            logger.info("Custom model metadata configured")
+
+        # Use existing batch processing
+        from batch_hf_models import batch_process_ontologies
+        results = batch_process_ontologies(
+            owl_directory=args.input_dir,
+            output_directory=args.output_dir,
+            base_models=args.base_models,
+            fusion_methods=args.fusion_methods,
+            epochs_list=args.epochs,
+            max_workers=args.max_workers,
+            force_retrain=args.force_retrain,
+            owl_pattern=args.owl_pattern,
+            limit=args.limit,
+            model_details=model_details if model_details else None,
+            upload_options=upload_options if upload_options else None
+        )
+
+        # Print summary
+        from batch_hf_models import print_summary_report
+        print_summary_report(results)
+
+        # Create collection if requested
+        if args.create_collection:
+            from batch_hf_models import create_model_collection
+            collection_path = create_model_collection(
+                summary=results,
+                collection_name=args.create_collection,
+                output_dir=args.output_dir,
+                selection_criteria=args.collection_criteria
+            )
+            print(f"✅ Collection created: {collection_path}")
+
+        return 0 if results.get('success_rate', 0) > 0 else 1
+
+    except Exception as e:
+        logger.error(f"Batch processing failed: {e}")
+        return 1
 
 
 def run_benchmark_command(args):

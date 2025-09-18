@@ -416,7 +416,7 @@ If you use this model, please cite the on2vec framework:
 ```bibtex
 @software{on2vec,
   title={on2vec: Ontology Embeddings with Graph Neural Networks},
-  author={Your Name},
+  author={David Steinberg},
   url={https://github.com/david4096/on2vec},
   year={2024}
 }
