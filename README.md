@@ -277,4 +277,21 @@ The model is immediately usable as a drop-in replacement for any sentence-transf
 
 ## License
 
-[Add license information]
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request. For major changes, please open an issue first to discuss what you would like to change.
+
+## Citation
+
+If you use on2vec in your research, please cite:
+
+```bibtex
+@software{on2vec2025,
+  title={on2vec: Ontology Embeddings with Graph Neural Networks},
+  author={David Gonzalez-Alonzo},
+  year={2025},
+  url={https://github.com/davidgonzalezalonzo/on2vec}
+}
+```
