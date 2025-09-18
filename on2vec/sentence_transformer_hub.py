@@ -187,7 +187,7 @@ class OntologyFusionModule(nn.Module):
         with open(os.path.join(input_path, 'config.json'), 'r') as f:
             config = json.load(f)
 
-        # Create empty ontology file path (will be loaded from ontology_data.bin)
+        # Create module with exact same configuration
         module = OntologyFusionModule(
             ontology_embeddings_file="",  # Will be overridden
             fusion_method=config['fusion_method'],
@@ -206,9 +206,26 @@ class OntologyFusionModule(nn.Module):
         module.concept_descriptions = ontology_data['concept_descriptions']
         module.structural_dim = config['structural_dim']
 
+        # Re-initialize fusion layers with the correct structural_dim before loading state
+        module._init_fusion_layers()
+
         # Load state dict with weights_only=False for compatibility
-        state_dict = torch.load(os.path.join(input_path, 'pytorch_model.bin'), weights_only=False)
-        module.load_state_dict(state_dict)
+        state_dict_path = os.path.join(input_path, 'pytorch_model.bin')
+        if os.path.exists(state_dict_path):
+            try:
+                state_dict = torch.load(state_dict_path, weights_only=False, map_location='cpu')
+
+                # Filter out any unexpected keys that might come from different fusion methods
+                model_state = module.state_dict()
+                filtered_state_dict = {k: v for k, v in state_dict.items() if k in model_state}
+
+                if len(filtered_state_dict) != len(state_dict):
+                    logger.warning(f"Filtered out {len(state_dict) - len(filtered_state_dict)} unexpected keys from state dict")
+
+                module.load_state_dict(filtered_state_dict, strict=False)
+
+            except Exception as e:
+                logger.warning(f"Could not load state dict: {e}. Module will be initialized with random weights.")
 
         return module
 

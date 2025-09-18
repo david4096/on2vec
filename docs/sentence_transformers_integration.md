@@ -46,12 +46,13 @@ uv run python create_hf_model.py train biomedical.owl \
 #### Step 2: Create HuggingFace Model
 
 ```bash
-# Create model from embeddings
+# Create model from embeddings (auto-detects base model)
 uv run python create_hf_model.py create embeddings.parquet my-model \
     --fusion concat \
-    --base-model all-MiniLM-L6-v2 \
     --output-dir ./hf_models
 ```
+
+**🧠 Smart Auto-Detection**: The CLI automatically detects the base model used to create the embeddings from the parquet metadata, so you don't need to specify `--base-model` unless you want to override it.
 
 #### Step 3: Test Model
 
@@ -434,7 +435,7 @@ python create_hf_model.py create EMBEDDINGS_FILE MODEL_NAME [options]
 
 # Options:
   --output-dir DIR          # Output directory
-  --base-model MODEL        # Base transformer model
+  --base-model MODEL        # Base transformer model (auto-detected if not specified)
   --fusion METHOD           # Fusion method
   --no-validate             # Skip embeddings validation
 ```
@@ -489,11 +490,29 @@ python batch_hf_models.py collection RESULTS_FILE --name COLLECTION_NAME
 python batch_hf_models.py summary RESULTS_FILE
 ```
 
+### 🧠 Smart Auto-Detection
+
+The CLI automatically infers the base model from embeddings metadata, eliminating the need to remember which text model was used:
+
+```bash
+# ✅ Automatically detects all-MiniLM-L6-v2 from embeddings
+python create_hf_model.py create embeddings.parquet my-model --fusion concat
+
+# ⚠️ Warns about mismatches and uses the correct model
+python create_hf_model.py create embeddings.parquet my-model \
+  --base-model all-mpnet-base-v2
+# Output: WARNING: Base model mismatch! Using detected model: all-MiniLM-L6-v2
+
+# 🔍 View embeddings metadata
+python create_hf_model.py validate embeddings.parquet
+# Shows: Text model: all-MiniLM-L6-v2 (384 dims)
+```
+
 ### Example Workflows
 
 **Single Model Creation**
 ```bash
-# Quick biomedical model
+# Quick biomedical model (auto-detects everything)
 python create_hf_model.py e2e biomedical.owl biomedical-embedder
 
 # Advanced configuration
