@@ -111,9 +111,21 @@ class EmbeddingEvaluator:
         logger.info("Starting intrinsic evaluation")
         results = {}
 
+        # Adjust cluster range based on number of samples
+        max_clusters = max(2, min(self.embeddings.shape[0] - 1, max(n_clusters_range)))
+        adjusted_n_clusters_range = [k for k in n_clusters_range if k < self.embeddings.shape[0]]
+
+        if not adjusted_n_clusters_range:
+            # If no clusters from the range are valid, create a reasonable range
+            max_reasonable_clusters = min(max_clusters, 10)
+            adjusted_n_clusters_range = list(range(2, max_reasonable_clusters + 1))
+
+        logger.info(f"Original cluster range: {n_clusters_range}")
+        logger.info(f"Adjusted cluster range for {self.embeddings.shape[0]} samples: {adjusted_n_clusters_range}")
+
         # 1. Clustering Quality Metrics
         results['clustering'] = self._evaluate_clustering(
-            clustering_methods, n_clusters_range, random_state
+            clustering_methods, adjusted_n_clusters_range, random_state
         )
 
         # 2. Embedding Distribution Analysis
@@ -210,11 +222,22 @@ class EmbeddingEvaluator:
         """Evaluate clustering quality of embeddings."""
         clustering_results = {}
 
+        # Safety check: ensure we have enough samples for clustering
+        if self.embeddings.shape[0] < 2:
+            logger.warning("Not enough samples for clustering evaluation")
+            return {'error': 'Insufficient samples for clustering (need at least 2)'}
+
+        # Filter out invalid cluster numbers
+        valid_n_clusters = [k for k in n_clusters_range if 2 <= k < self.embeddings.shape[0]]
+        if not valid_n_clusters:
+            logger.warning(f"No valid cluster numbers for {self.embeddings.shape[0]} samples")
+            return {'error': f'No valid cluster numbers for {self.embeddings.shape[0]} samples'}
+
         for method in methods:
             method_results = {}
 
             if method == 'kmeans':
-                for n_clusters in n_clusters_range:
+                for n_clusters in valid_n_clusters:
                     kmeans = KMeans(n_clusters=n_clusters, random_state=random_state, n_init=10)
                     labels = kmeans.fit_predict(self.embeddings)
 
@@ -248,7 +271,7 @@ class EmbeddingEvaluator:
                         }
 
             elif method == 'hierarchical':
-                for n_clusters in n_clusters_range:
+                for n_clusters in valid_n_clusters:
                     hierarchical = AgglomerativeClustering(n_clusters=n_clusters)
                     labels = hierarchical.fit_predict(self.embeddings)
 

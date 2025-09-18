@@ -328,12 +328,14 @@ class TextAugmentedOntologyGNN(torch.nn.Module):
             if relation_types is None:
                 raise ValueError("Heterogeneous model requires relation_types to be specified")
             self.num_relations = len(relation_types)
+            self.relation_types = relation_types
             # Separate GCN layers for each relation type
             self.relation_convs1 = torch.nn.ModuleDict()
             self.relation_convs2 = torch.nn.ModuleDict()
 
-            for rel_type in relation_types:
-                rel_key = str(rel_type)
+            for i, rel_type in enumerate(relation_types):
+                # Use index-based key for PyTorch module names (they can't contain dots or special chars)
+                rel_key = f"rel_{i}"
                 self.relation_convs1[rel_key] = GCNConv(self.input_dim, hidden_dim)
                 self.relation_convs2[rel_key] = GCNConv(hidden_dim, out_dim)
 
@@ -425,7 +427,8 @@ class TextAugmentedOntologyGNN(torch.nn.Module):
             relation_outputs = []
 
             for rel_idx, rel_type in enumerate(self.relation_types):
-                rel_key = str(rel_type)
+                # Use index-based key for module access
+                rel_key = f"rel_{rel_idx}"
 
                 # Find edges of this relation type
                 mask = edge_type == rel_idx
