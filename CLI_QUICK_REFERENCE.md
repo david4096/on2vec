@@ -1,15 +1,28 @@
 # on2vec CLI Quick Reference
 
+## 📥 Installation
+
+```bash
+# Basic installation
+pip install on2vec
+
+# With benchmarking support
+pip install on2vec[benchmark]
+
+# All features
+pip install on2vec[all]
+```
+
 ## 🚀 HuggingFace Sentence Transformers Integration
 
 ### One-Command Model Creation
 
 ```bash
 # Create complete HuggingFace model from OWL file (with auto model card generation)
-python create_hf_model.py e2e biomedical.owl my-biomedical-model
+on2vec hf biomedical.owl my-biomedical-model
 
 # With custom settings (auto-generates comprehensive model card)
-python create_hf_model.py e2e ontology.owl my-model \
+on2vec hf ontology.owl my-model \
   --base-model all-mpnet-base-v2 \
   --fusion gated \
   --epochs 200
@@ -19,16 +32,16 @@ python create_hf_model.py e2e ontology.owl my-model \
 
 ```bash
 # 1. Train ontology with text features
-python create_hf_model.py train ontology.owl --output embeddings.parquet
+on2vec hf-train ontology.owl --output embeddings.parquet
 
 # 2. Create HuggingFace model (auto-detects base model from embeddings)
-python create_hf_model.py create embeddings.parquet my-model --fusion concat
+on2vec hf-create embeddings.parquet my-model --fusion concat
 
 # 3. Test model
-python create_hf_model.py test ./hf_models/my-model
+on2vec hf-test ./hf_models/my-model
 
-# 4. Show upload instructions
-python create_hf_model.py upload-info ./hf_models/my-model my-model
+# 4. Inspect model details
+on2vec inspect ./hf_models/my-model
 ```
 
 ### 🧠 Smart Auto-Detection
@@ -37,10 +50,10 @@ The CLI automatically detects the base model used to create embeddings:
 
 ```bash
 # ✅ Auto-detects all-MiniLM-L6-v2 from embeddings metadata
-python create_hf_model.py create embeddings.parquet my-model
+on2vec hf-create embeddings.parquet my-model
 
 # ⚠️  Warns about mismatches and uses the correct model
-python create_hf_model.py create embeddings.parquet my-model --base-model all-mpnet-base-v2
+on2vec hf-create embeddings.parquet my-model --base-model all-mpnet-base-v2
 # WARNING: Base model mismatch! Using detected model: all-MiniLM-L6-v2
 ```
 
@@ -48,68 +61,69 @@ python create_hf_model.py create embeddings.parquet my-model --base-model all-mp
 
 ```bash
 # Process directory of OWL files
-python batch_hf_models.py process owl_files/ ./output \
+on2vec hf-batch owl_files/ ./output \
   --base-models all-MiniLM-L6-v2 all-mpnet-base-v2 \
   --fusion-methods concat gated \
   --max-workers 4
-
-# Create model collection
-python batch_hf_models.py collection ./output/batch_results.json \
-  --name "biomedical-models" --criteria best_test
 ```
 
 ### Utilities
 
 ```bash
-# Validate embeddings
-python create_hf_model.py validate embeddings.parquet
+# Inspect embeddings or models
+on2vec inspect embeddings.parquet
+on2vec inspect ./hf_models/my-model
 
-# Test existing model
-python create_hf_model.py test ./models/my-model
+# Convert formats
+on2vec convert embeddings.parquet embeddings.csv
 
 # Show help
-python create_hf_model.py --help
-python batch_hf_models.py --help
+on2vec --help
+on2vec hf --help
 ```
 
-## 📊 Original on2vec Commands
+## 📊 Core on2vec Commands
 
 ### Basic Training
 
 ```bash
 # Train GCN model
-python main.py ontology.owl --model_type gcn --epochs 100
+on2vec train ontology.owl --output model.pt --model-type gcn --epochs 100
 
 # Train with text features (for HF integration)
-python main.py ontology.owl --use_text_features --output embeddings.parquet
+on2vec train ontology.owl --output embeddings.parquet --use-text-features
 
 # Custom configuration
-python main.py ontology.owl \
-  --model_type gat \
-  --hidden_dim 256 \
-  --out_dim 128 \
+on2vec train ontology.owl --output model.pt \
+  --model-type gat \
+  --hidden-dim 256 \
+  --out-dim 128 \
   --epochs 200 \
-  --loss_fn contrastive
+  --loss-fn contrastive
+```
+
+### Generate Embeddings
+
+```bash
+# Generate embeddings from trained model
+on2vec embed model.pt ontology.owl --output embeddings.parquet
 ```
 
 ### Visualization
 
 ```bash
 # Create UMAP visualization
-python viz.py embeddings.parquet --output visualization.png
-
-# Batch visualization
-python process_dir.py owl_files/ --model_type gcn --epochs 100
+on2vec visualize embeddings.parquet --output visualization.png
 ```
 
 ### Multi-relation Models
 
 ```bash
 # Train multi-relation model
-python main.py ontology.owl --use_multi_relation --model_type rgcn
+on2vec train ontology.owl --output model.pt --use-multi-relation --model-type rgcn
 
 # Heterogeneous model
-python main.py ontology.owl --use_multi_relation --model_type heterogeneous
+on2vec train ontology.owl --output model.pt --use-multi-relation --model-type heterogeneous
 ```
 
 ## 🔧 Advanced Workflows
@@ -118,13 +132,13 @@ python main.py ontology.owl --use_multi_relation --model_type heterogeneous
 
 ```bash
 # Biomedical domain
-python create_hf_model.py e2e biomedical_ontology.owl bio-embedder \
+on2vec hf biomedical_ontology.owl bio-embedder \
   --base-model dmis-lab/biobert-v1.1 \
   --fusion gated \
   --epochs 150
 
 # Legal domain
-python create_hf_model.py e2e legal_ontology.owl legal-embedder \
+on2vec hf legal_ontology.owl legal-embedder \
   --base-model nlpaueb/legal-bert-base-uncased \
   --fusion attention
 ```
@@ -134,13 +148,13 @@ python create_hf_model.py e2e legal_ontology.owl legal-embedder \
 ```bash
 # Create multiple fusion variants
 for method in concat weighted_avg attention gated; do
-  python create_hf_model.py create embeddings.parquet "model-$method" \
+  on2vec hf-create embeddings.parquet "model-$method" \
     --fusion $method --output-dir ./comparison
 done
 
 # Test all variants
 for model in ./comparison/model-*; do
-  python create_hf_model.py test "$model"
+  on2vec hf-test "$model"
 done
 ```
 
@@ -148,7 +162,7 @@ done
 
 ```bash
 # 1. Comprehensive training
-python create_hf_model.py train ontology.owl \
+on2vec hf-train ontology.owl \
   --output production_embeddings.parquet \
   --text-model all-mpnet-base-v2 \
   --epochs 300 \
@@ -156,23 +170,23 @@ python create_hf_model.py train ontology.owl \
   --hidden-dim 512
 
 # 2. Create production model
-python create_hf_model.py create production_embeddings.parquet production-model \
+on2vec hf-create production_embeddings.parquet production-model \
   --fusion gated \
   --base-model all-mpnet-base-v2 \
   --output-dir ./production
 
 # 3. Validate thoroughly
-python create_hf_model.py test ./production/production-model \
+on2vec hf-test ./production/production-model \
   --queries "domain term 1" "domain term 2" "domain term 3"
 ```
 
 ## 📤 HuggingFace Hub Upload
 
 ```bash
-# Get upload instructions (auto-generated during model creation)
-python create_hf_model.py upload-info ./hf_models/my-model my-model
+# Upload instructions auto-generated in each model directory:
+# See ./hf_models/my-model/UPLOAD_INSTRUCTIONS.md
 
-# Manual upload process (instructions in model's UPLOAD_INSTRUCTIONS.md):
+# Manual upload process:
 # 1. pip install huggingface_hub
 # 2. huggingface-cli login
 # 3. Upload model:
@@ -194,18 +208,20 @@ model.push_to_hub('your-username/my-model')
 
 ```bash
 # Quick benchmark test
-python mteb_benchmarks/benchmark_runner.py ./hf_models/my-model --quick
+on2vec benchmark ./hf_models/my-model --quick
 
 # Full MTEB benchmark
-python mteb_benchmarks/benchmark_runner.py ./hf_models/my-model
+on2vec benchmark ./hf_models/my-model
 
 # Focus on specific task types
-python mteb_benchmarks/benchmark_runner.py ./hf_models/my-model \
-  --task-types STS Classification
+on2vec benchmark ./hf_models/my-model --task-types STS Classification
 
 # Compare with vanilla model
-python mteb_benchmarks/benchmark_runner.py sentence-transformers/all-MiniLM-L6-v2 \
+on2vec benchmark sentence-transformers/all-MiniLM-L6-v2 \
   --model-name vanilla-baseline --quick
+
+# Compare ontology vs vanilla models
+on2vec compare ./hf_models/my-model --detailed
 ```
 
 ## ⚡ Quick Tips

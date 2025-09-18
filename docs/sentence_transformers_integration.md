@@ -2,6 +2,16 @@
 
 This guide shows how to create production-ready Sentence Transformers models that incorporate ontology knowledge from on2vec embeddings.
 
+## Installation
+
+```bash
+# Install on2vec
+pip install on2vec
+
+# With benchmarking support
+pip install on2vec[benchmark]
+```
+
 ## Overview
 
 The integration allows you to:
@@ -18,7 +28,7 @@ Create a complete HuggingFace model in one command:
 
 ```bash
 # Complete end-to-end workflow
-uv run python create_hf_model.py e2e biomedical.owl my-biomedical-model
+on2vec hf biomedical.owl my-biomedical-model
 ```
 
 This single command:
@@ -36,7 +46,7 @@ This single command:
 
 ```bash
 # Train with custom configuration
-uv run python create_hf_model.py train biomedical.owl \
+on2vec hf-train biomedical.owl \
     --output embeddings.parquet \
     --text-model all-MiniLM-L6-v2 \
     --epochs 100 \
@@ -49,7 +59,7 @@ uv run python create_hf_model.py train biomedical.owl \
 
 ```bash
 # Create model from embeddings (auto-detects base model)
-uv run python create_hf_model.py create embeddings.parquet my-model \
+on2vec hf-create embeddings.parquet my-model \
     --fusion concat \
     --output-dir ./hf_models
 ```
@@ -262,26 +272,28 @@ Evaluate your ontology-augmented models against standard benchmarks:
 
 ```bash
 # Fast benchmark on subset of tasks
-python mteb_benchmarks/benchmark_runner.py ./hf_models/my-model --quick
+on2vec benchmark ./hf_models/my-model --quick
 
 # Focus on semantic similarity tasks (ideal for ontology models)
-python mteb_benchmarks/benchmark_runner.py ./hf_models/my-model \
-  --task-types STS
+on2vec benchmark ./hf_models/my-model --task-types STS
 
 # Full MTEB benchmark (58+ tasks)
-python mteb_benchmarks/benchmark_runner.py ./hf_models/my-model
+on2vec benchmark ./hf_models/my-model
 ```
 
 ### Comparative Analysis
 
 ```bash
 # Benchmark vanilla baseline
-python mteb_benchmarks/benchmark_runner.py sentence-transformers/all-MiniLM-L6-v2 \
+on2vec benchmark sentence-transformers/all-MiniLM-L6-v2 \
   --model-name vanilla-baseline --quick
 
 # Compare with your ontology model
-python mteb_benchmarks/benchmark_runner.py ./hf_models/my-model \
+on2vec benchmark ./hf_models/my-model \
   --model-name ontology-augmented --quick
+
+# Compare ontology vs vanilla models
+on2vec compare ./hf_models/my-model --detailed
 
 # Results saved in mteb_results/ with detailed reports
 ```

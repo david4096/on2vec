@@ -1,32 +1,21 @@
 #!/usr/bin/env python3
 """
-CLI tool for creating HuggingFace compatible Sentence Transformer models from on2vec embeddings.
+HuggingFace integration workflows for on2vec.
 
-This provides a streamlined command-line interface for the complete workflow:
-1. Train ontology model with text features
-2. Generate multi-embedding files
-3. Create HuggingFace compatible models
-4. Test and validate models
-5. Prepare for Hub upload
+This module contains all the HuggingFace Sentence Transformers integration
+functionality that was previously in create_hf_model.py and batch_hf_models.py.
 """
 
-import argparse
-import sys
-import json
-from pathlib import Path
 import logging
+from pathlib import Path
 from typing import Optional, List, Dict, Any
 
-# Add the project root to the path
-sys.path.insert(0, str(Path(__file__).parent))
+from .workflows import train_and_embed_workflow
+from .sentence_transformer_hub import create_and_save_hf_model
+from .io import inspect_parquet_metadata
+from .metadata_utils import get_base_model_from_embeddings, get_embedding_info, validate_text_embeddings_compatibility
+from .model_card_generator import create_model_card, create_upload_instructions
 
-from on2vec.sentence_transformer_hub import create_and_save_hf_model
-from on2vec.io import inspect_parquet_metadata
-from on2vec.metadata_utils import get_base_model_from_embeddings, get_embedding_info, validate_text_embeddings_compatibility
-from on2vec.model_card_generator import create_model_card, create_upload_instructions
-import subprocess
-
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -46,62 +35,52 @@ def train_ontology_with_text(
     print(f"🤖 Text model: {text_model}")
     print(f"⚙️ Config: {model_type}, hidden={hidden_dim}, out={out_dim}, loss={loss_fn}, epochs={epochs}")
 
-    cmd = [
-        "uv", "run", "python", "main.py", owl_file,
-        "--use_text_features",
-        "--text_model_name", text_model,
-        "--output", output_file,
-        "--model_type", model_type,
-        "--hidden_dim", str(hidden_dim),
-        "--out_dim", str(out_dim),
-        "--epochs", str(epochs),
-        "--loss_fn", loss_fn
-    ]
-
-    print(f"🔧 Command: {' '.join(cmd)}")
-
     try:
-        result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+        # Use the workflow function instead of subprocess
+        result = train_and_embed_workflow(
+            owl_file=owl_file,
+            model_type=model_type,
+            hidden_dim=hidden_dim,
+            out_dim=out_dim,
+            epochs=epochs,
+            output=output_file,
+            model_output=f"{Path(output_file).stem}_model.pt",
+            loss_fn=loss_fn,
+            use_text_features=True,
+            text_model_name=text_model,
+            fusion_method="concat"
+        )
+
         print("✅ Training completed successfully!")
         return True
-    except subprocess.CalledProcessError as e:
-        print(f"❌ Training failed with exit code {e.returncode}")
-        print(f"Error output: {e.stderr}")
+
+    except Exception as e:
+        print(f"❌ Training failed: {e}")
+        logger.error(f"Training failed: {e}")
         return False
 
 
 def validate_embeddings(embeddings_file: str) -> Dict[str, Any]:
-    """Validate and inspect embeddings file."""
+    """Validate embeddings file and return metadata."""
     print(f"🔍 Validating embeddings: {embeddings_file}")
 
-    if not Path(embeddings_file).exists():
-        raise FileNotFoundError(f"Embeddings file not found: {embeddings_file}")
-
-    # Inspect metadata
     try:
+        # Use the existing inspection function
         inspect_parquet_metadata(embeddings_file)
 
-        # Additional validation
-        import polars as pl
-        df = pl.read_parquet(embeddings_file)
-
-        required_cols = ['node_id', 'text_embedding', 'structural_embedding']
-        if not all(col in df.columns for col in required_cols):
-            raise ValueError(f"Missing required columns: {required_cols}")
-
-        metadata = {
-            'num_concepts': len(df),
-            'has_text_embeddings': 'text_embedding' in df.columns,
-            'has_structural_embeddings': 'structural_embedding' in df.columns,
-            'text_dim': len(df['text_embedding'][0]) if 'text_embedding' in df.columns else None,
-            'structural_dim': len(df['structural_embedding'][0]) if 'structural_embedding' in df.columns else None
-        }
+        # Get detailed metadata
+        embedding_info = get_embedding_info(embeddings_file)
 
         print("✅ Embeddings validation passed!")
-        return metadata
+        print(f"   Concepts: {embedding_info.get('num_embeddings', 'Unknown'):,}")
+        print(f"   Text dim: {embedding_info.get('text_dim', 'Unknown')}")
+        print(f"   Structural dim: {embedding_info.get('structural_dim', 'Unknown')}")
+
+        return embedding_info
 
     except Exception as e:
         print(f"❌ Validation failed: {e}")
+        logger.error(f"Validation failed: {e}")
         raise
 
 
@@ -112,8 +91,8 @@ def create_hf_model(
     base_model: Optional[str] = None,
     fusion_method: str = "concat",
     validate_first: bool = True,
-    ontology_file: Optional[str] = None,  # For model card generation
-    training_config: Optional[Dict[str, Any]] = None  # For model card generation
+    ontology_file: Optional[str] = None,
+    training_config: Optional[Dict[str, Any]] = None
 ) -> str:
     """Create HuggingFace compatible model."""
     print(f"🏗️ Creating HuggingFace model: {model_name}")
@@ -181,10 +160,11 @@ def create_hf_model(
 
     except Exception as e:
         print(f"❌ Model creation failed: {e}")
+        logger.error(f"Model creation failed: {e}")
         raise
 
 
-def test_model(model_path: str, test_queries: Optional[List[str]] = None) -> bool:
+def validate_hf_model(model_path: str, test_queries: Optional[List[str]] = None) -> bool:
     """Test the created model with sample queries."""
     print(f"🧪 Testing model: {model_path}")
 
@@ -193,7 +173,7 @@ def test_model(model_path: str, test_queries: Optional[List[str]] = None) -> boo
             "heart disease",
             "cardiovascular problems",
             "protein folding",
-            "neurodegenerative disorders",
+            "gene expression",
             "genetic mutations"
         ]
 
@@ -223,6 +203,7 @@ def test_model(model_path: str, test_queries: Optional[List[str]] = None) -> boo
 
     except Exception as e:
         print(f"❌ Model testing failed: {e}")
+        logger.error(f"Model testing failed: {e}")
         return False
 
 
@@ -303,7 +284,7 @@ def end_to_end_workflow(
         # Step 2: Validate embeddings
         print("\n🔍 Step 2: Validating embeddings")
         metadata = validate_embeddings(embeddings_file)
-        print(f"   Concepts: {metadata['num_concepts']:,}")
+        print(f"   Concepts: {metadata['num_embeddings']:,}")
         print(f"   Text dim: {metadata['text_dim']}")
         print(f"   Structural dim: {metadata['structural_dim']}")
 
@@ -337,7 +318,7 @@ def end_to_end_workflow(
         # Step 4: Test model (if not skipping)
         if not skip_testing:
             print(f"\n🧪 Step 4: Testing model")
-            if not test_model(model_path):
+            if not validate_hf_model(model_path):
                 return False
         else:
             print(f"\n🧪 Step 4: Skipping model testing")
@@ -355,158 +336,5 @@ def end_to_end_workflow(
 
     except Exception as e:
         print(f"\n❌ Workflow failed: {e}")
+        logger.error(f"Workflow failed: {e}")
         return False
-
-
-def main():
-    parser = argparse.ArgumentParser(
-        description="Create HuggingFace Sentence Transformer models from on2vec ontology embeddings",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  # Complete end-to-end workflow
-  python create_hf_model.py e2e biomedical.owl my-biomedical-model
-
-  # Train ontology with text features
-  python create_hf_model.py train biomedical.owl --output embeddings.parquet
-
-  # Create HF model from existing embeddings
-  python create_hf_model.py create embeddings.parquet my-model --fusion concat
-
-  # Test existing model
-  python create_hf_model.py test ./hf_models/my-model
-
-Advanced examples:
-  # Custom training configuration
-  python create_hf_model.py train ontology.owl \\
-    --text-model all-mpnet-base-v2 \\
-    --epochs 200 \\
-    --model-type gat \\
-    --hidden-dim 256 \\
-    --out-dim 128
-
-  # Different fusion methods
-  python create_hf_model.py create embeddings.parquet my-model \\
-    --fusion gated \\
-    --base-model distilbert-base-nli-mean-tokens
-        """
-    )
-
-    subparsers = parser.add_subparsers(dest='command', help='Commands')
-
-    # End-to-end workflow
-    e2e_parser = subparsers.add_parser('e2e', help='Run complete end-to-end workflow')
-    e2e_parser.add_argument('owl_file', help='Path to OWL ontology file')
-    e2e_parser.add_argument('model_name', help='Name for the HuggingFace model')
-    e2e_parser.add_argument('--output-dir', default='./hf_models', help='Output directory for models')
-    e2e_parser.add_argument('--embeddings-file', help='Path to embeddings file (will be generated if not provided)')
-    e2e_parser.add_argument('--base-model', default='all-MiniLM-L6-v2', help='Base Sentence Transformer model')
-    e2e_parser.add_argument('--fusion', choices=['concat', 'weighted_avg', 'attention', 'gated'],
-                            default='concat', help='Fusion method')
-    e2e_parser.add_argument('--epochs', type=int, default=100, help='Training epochs')
-    e2e_parser.add_argument('--skip-training', action='store_true', help='Skip training step')
-    e2e_parser.add_argument('--skip-testing', action='store_true', help='Skip model testing')
-
-    # Training subcommand
-    train_parser = subparsers.add_parser('train', help='Train ontology model with text features')
-    train_parser.add_argument('owl_file', help='Path to OWL ontology file')
-    train_parser.add_argument('--output', required=True, help='Output parquet file path')
-    train_parser.add_argument('--text-model', default='all-MiniLM-L6-v2', help='Text model name')
-    train_parser.add_argument('--epochs', type=int, default=100, help='Number of training epochs')
-    train_parser.add_argument('--model-type', choices=['gcn', 'gat', 'rgcn'], default='gcn', help='GNN model type')
-    train_parser.add_argument('--hidden-dim', type=int, default=128, help='Hidden dimension')
-    train_parser.add_argument('--out-dim', type=int, default=64, help='Output dimension')
-    train_parser.add_argument('--loss-fn', choices=['triplet', 'contrastive', 'cosine', 'cross_entropy'],
-                              default='triplet', help='Loss function')
-
-    # Model creation subcommand
-    create_parser = subparsers.add_parser('create', help='Create HuggingFace model from embeddings')
-    create_parser.add_argument('embeddings_file', help='Path to embeddings parquet file')
-    create_parser.add_argument('model_name', help='Name for the model')
-    create_parser.add_argument('--output-dir', default='./hf_models', help='Output directory')
-    create_parser.add_argument('--base-model', help='Base Sentence Transformer model (auto-detected if not specified)')
-    create_parser.add_argument('--fusion', choices=['concat', 'weighted_avg', 'attention', 'gated'],
-                               default='concat', help='Fusion method')
-    create_parser.add_argument('--no-validate', action='store_true', help='Skip embeddings validation')
-
-    # Model testing subcommand
-    test_parser = subparsers.add_parser('test', help='Test HuggingFace model')
-    test_parser.add_argument('model_path', help='Path to model directory')
-    test_parser.add_argument('--queries', nargs='+', help='Custom test queries')
-
-    # Validation subcommand
-    validate_parser = subparsers.add_parser('validate', help='Validate embeddings file')
-    validate_parser.add_argument('embeddings_file', help='Path to embeddings parquet file')
-
-    # Upload instructions subcommand
-    upload_parser = subparsers.add_parser('upload-info', help='Show upload instructions for model')
-    upload_parser.add_argument('model_path', help='Path to model directory')
-    upload_parser.add_argument('model_name', help='Model name for Hub')
-
-    args = parser.parse_args()
-
-    if args.command is None:
-        parser.print_help()
-        return 1
-
-    try:
-        if args.command == 'e2e':
-            success = end_to_end_workflow(
-                owl_file=args.owl_file,
-                model_name=args.model_name,
-                output_dir=args.output_dir,
-                embeddings_file=args.embeddings_file,
-                base_model=args.base_model,
-                fusion_method=args.fusion,
-                epochs=args.epochs,
-                skip_training=args.skip_training,
-                skip_testing=args.skip_testing
-            )
-            return 0 if success else 1
-
-        elif args.command == 'train':
-            success = train_ontology_with_text(
-                owl_file=args.owl_file,
-                output_file=args.output,
-                text_model=args.text_model,
-                epochs=args.epochs,
-                model_type=args.model_type,
-                hidden_dim=args.hidden_dim,
-                out_dim=args.out_dim,
-                loss_fn=args.loss_fn
-            )
-            return 0 if success else 1
-
-        elif args.command == 'create':
-            model_path = create_hf_model(
-                embeddings_file=args.embeddings_file,
-                model_name=args.model_name,
-                output_dir=args.output_dir,
-                base_model=args.base_model,
-                fusion_method=args.fusion,
-                validate_first=not args.no_validate
-            )
-            print(f"\n🎉 Success! Model created at: {model_path}")
-            return 0
-
-        elif args.command == 'test':
-            success = test_model(args.model_path, args.queries)
-            return 0 if success else 1
-
-        elif args.command == 'validate':
-            validate_embeddings(args.embeddings_file)
-            return 0
-
-        elif args.command == 'upload-info':
-            show_upload_instructions(args.model_path, args.model_name)
-            return 0
-
-    except Exception as e:
-        logger.error(f"Command failed: {e}")
-        return 1
-
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())
