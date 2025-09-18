@@ -13,6 +13,8 @@ def cross_entropy_loss(embeddings, edge_index, num_neg_samples=1000):
     """
     Binary cross-entropy loss for node embeddings.
 
+    Optimized version that uses set-based edge checking for faster negative sampling.
+
     Args:
         embeddings (torch.Tensor): Node embeddings
         edge_index (torch.Tensor): Graph edge indices
@@ -27,31 +29,47 @@ def cross_entropy_loss(embeddings, edge_index, num_neg_samples=1000):
     pos_src = edge_index[0]
     pos_dst = edge_index[1]
 
-    # Generate negative samples
-    neg_indices_src = []
-    neg_indices_dst = []
-    negative_samples_found = 0
+    # Create a set of existing edges for fast lookup
+    edge_set = set()
+    for i in range(edge_index.size(1)):
+        edge_set.add((edge_index[0][i].item(), edge_index[1][i].item()))
 
-    while negative_samples_found < num_neg_samples:
-        candidate_src = torch.randint(0, num_nodes, (num_neg_samples,))
-        candidate_dst = torch.randint(0, num_nodes, (num_neg_samples,))
+    # Generate negative samples more efficiently
+    neg_src = []
+    neg_dst = []
+    attempts = 0
+    max_attempts = num_neg_samples * 10  # Prevent infinite loops
 
-        # Ensure negative samples are not actual edges
-        mask = ~torch.isin(torch.stack([candidate_src, candidate_dst], dim=0).t(), edge_index.t()).any(dim=1)
+    while len(neg_src) < num_neg_samples and attempts < max_attempts:
+        # Generate batch of candidates
+        batch_size = min(num_neg_samples * 2, num_neg_samples - len(neg_src))
+        candidate_src = torch.randint(0, num_nodes, (batch_size,))
+        candidate_dst = torch.randint(0, num_nodes, (batch_size,))
 
-        valid_src = candidate_src[mask]
-        valid_dst = candidate_dst[mask]
+        # Filter out existing edges
+        for i in range(batch_size):
+            src_item = candidate_src[i].item()
+            dst_item = candidate_dst[i].item()
+            if (src_item, dst_item) not in edge_set and src_item != dst_item:
+                neg_src.append(src_item)
+                neg_dst.append(dst_item)
+                if len(neg_src) >= num_neg_samples:
+                    break
 
-        neg_indices_src.append(valid_src)
-        neg_indices_dst.append(valid_dst)
+        attempts += batch_size
 
-        negative_samples_found += valid_src.size(0)
+    # Convert to tensors
+    neg_indices_src = torch.tensor(neg_src[:num_neg_samples], dtype=torch.long, device=embeddings.device)
+    neg_indices_dst = torch.tensor(neg_dst[:num_neg_samples], dtype=torch.long, device=embeddings.device)
 
-    neg_indices_src = torch.cat(neg_indices_src)[:num_neg_samples]
-    neg_indices_dst = torch.cat(neg_indices_dst)[:num_neg_samples]
+    if len(neg_indices_src) == 0:
+        logger.warning("No valid negative samples found, using random samples")
+        neg_indices_src = torch.randint(0, num_nodes, (min(100, num_neg_samples),), device=embeddings.device)
+        neg_indices_dst = torch.randint(0, num_nodes, (min(100, num_neg_samples),), device=embeddings.device)
 
     # Prepare labels: 1 for positive pairs, 0 for negative pairs
-    labels = torch.cat([torch.ones(pos_src.size(0)), torch.zeros(neg_indices_src.size(0))])
+    labels = torch.cat([torch.ones(pos_src.size(0), device=embeddings.device),
+                       torch.zeros(neg_indices_src.size(0), device=embeddings.device)])
 
     # Calculate scores for positive and negative pairs
     pos_scores = (embeddings[pos_src] * embeddings[pos_dst]).sum(dim=1)
