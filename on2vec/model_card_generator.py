@@ -180,7 +180,7 @@ def generate_model_card_content(
     # Header
     content = f"""# {model_name}
 
-This is a sentence-transformers model created with [on2vec](https://github.com/davidmartinrius/on2vec), which augments text embeddings with ontological knowledge using Graph Neural Networks.
+This is a sentence-transformers model created with [on2vec](https://github.com/david4096/on2vec), which augments text embeddings with ontological knowledge using Graph Neural Networks.
 
 ## Model Details
 
@@ -417,14 +417,14 @@ If you use this model, please cite the on2vec framework:
 @software{on2vec,
   title={on2vec: Ontology Embeddings with Graph Neural Networks},
   author={Your Name},
-  url={https://github.com/davidmartinrius/on2vec},
+  url={https://github.com/david4096/on2vec},
   year={2024}
 }
 ```
 
 ---
 
-Created with [on2vec](https://github.com/davidmartinrius/on2vec) 🧬→🤖
+Created with [on2vec](https://github.com/david4096/on2vec) 🧬→🤖
 """
 
     return content
