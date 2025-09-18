@@ -50,6 +50,8 @@ def create_parser() -> argparse.ArgumentParser:
     setup_hf_batch_parser(subparsers)
 
     # Evaluation and benchmarking
+    setup_evaluate_parser(subparsers)
+    setup_evaluate_batch_parser(subparsers)
     setup_benchmark_parser(subparsers)
     setup_compare_parser(subparsers)
 
@@ -234,6 +236,68 @@ def setup_hf_batch_parser(subparsers):
     hf_batch_parser.add_argument('--fusion-methods', nargs='+', default=['concat'],
                                  help='Fusion methods to test')
     hf_batch_parser.add_argument('--max-workers', type=int, default=2, help='Parallel workers')
+
+
+def setup_evaluate_parser(subparsers):
+    """Set up the evaluate command parser."""
+    evaluate_parser = subparsers.add_parser(
+        'evaluate',
+        help='Comprehensively evaluate ontology embeddings',
+        description='Perform intrinsic and extrinsic evaluation of ontology embeddings'
+    )
+
+    evaluate_parser.add_argument('embeddings', help='Path to embeddings parquet file')
+    evaluate_parser.add_argument('--ontology', help='Path to original OWL ontology file (enables structural evaluation)')
+    evaluate_parser.add_argument('--output-dir', help='Directory to save evaluation results and visualizations')
+    evaluate_parser.add_argument('--no-plots', action='store_true', help='Skip generating visualization plots')
+
+    # Evaluation subset selection
+    eval_group = evaluate_parser.add_argument_group('Evaluation Selection')
+    eval_group.add_argument('--intrinsic', action='store_true', help='Run only intrinsic evaluation')
+    eval_group.add_argument('--extrinsic', action='store_true', help='Run only extrinsic evaluation')
+    eval_group.add_argument('--ontology-specific', action='store_true', help='Run only ontology-specific evaluation')
+    eval_group.add_argument('--skip-clustering', action='store_true', help='Skip clustering analysis')
+    eval_group.add_argument('--skip-link-prediction', action='store_true', help='Skip link prediction evaluation')
+    eval_group.add_argument('--skip-hierarchy', action='store_true', help='Skip hierarchy preservation evaluation')
+
+    # Clustering configuration
+    cluster_group = evaluate_parser.add_argument_group('Clustering Configuration')
+    cluster_group.add_argument('--clustering-methods', nargs='+',
+                              choices=['kmeans', 'dbscan', 'hierarchical'],
+                              default=['kmeans', 'dbscan', 'hierarchical'],
+                              help='Clustering methods to evaluate')
+    cluster_group.add_argument('--n-clusters', nargs='+', type=int,
+                              default=[5, 10, 15, 20],
+                              help='Number of clusters to test for k-means and hierarchical')
+
+    evaluate_parser.add_argument('--verbose', '-v', action='store_true', help='Enable verbose logging')
+
+
+def setup_evaluate_batch_parser(subparsers):
+    """Set up the evaluate-batch command parser."""
+    batch_parser = subparsers.add_parser(
+        'evaluate-batch',
+        help='Evaluate multiple embedding files in batch',
+        description='Run comprehensive evaluation on multiple embedding files and create comparison reports'
+    )
+
+    batch_parser.add_argument('embeddings', nargs='*', help='Paths to embedding parquet files')
+    batch_parser.add_argument('--embeddings-list', help='File containing list of embedding file paths (one per line)')
+    batch_parser.add_argument('--ontology', nargs='*', help='Paths to corresponding OWL ontology files (optional)')
+    batch_parser.add_argument('--ontology-list', help='File containing list of ontology file paths (one per line)')
+    batch_parser.add_argument('--output-dir', default='evaluation_batch_results',
+                             help='Directory to save batch evaluation results')
+
+    # Evaluation subset selection (same as single evaluation)
+    eval_group = batch_parser.add_argument_group('Evaluation Selection')
+    eval_group.add_argument('--intrinsic', action='store_true', help='Run only intrinsic evaluation')
+    eval_group.add_argument('--extrinsic', action='store_true', help='Run only extrinsic evaluation')
+    eval_group.add_argument('--ontology-specific', action='store_true', help='Run only ontology-specific evaluation')
+    eval_group.add_argument('--skip-clustering', action='store_true', help='Skip clustering analysis')
+    eval_group.add_argument('--skip-link-prediction', action='store_true', help='Skip link prediction evaluation')
+    eval_group.add_argument('--skip-hierarchy', action='store_true', help='Skip hierarchy preservation evaluation')
+
+    batch_parser.add_argument('--verbose', '-v', action='store_true', help='Enable verbose logging')
 
 
 def setup_benchmark_parser(subparsers):
@@ -525,6 +589,267 @@ def run_benchmark_command(args):
     return subprocess.run(cmd).returncode
 
 
+def run_evaluate_command(args):
+    """Execute the evaluate command."""
+    from .evaluation import EmbeddingEvaluator
+    import logging
+    from pathlib import Path
+
+    # Set up logging
+    level = logging.DEBUG if args.verbose else logging.INFO
+    logging.basicConfig(
+        level=level,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+
+    logger = logging.getLogger(__name__)
+    logger.info(f"Evaluating embeddings: {args.embeddings}")
+
+    # Create output directory if specified
+    if args.output_dir:
+        Path(args.output_dir).mkdir(parents=True, exist_ok=True)
+        report_path = Path(args.output_dir) / "evaluation_report.json"
+    else:
+        report_path = None
+
+    try:
+        # Create evaluator
+        evaluator = EmbeddingEvaluator(args.embeddings, args.ontology)
+
+        # Determine which evaluations to run
+        run_intrinsic = not args.extrinsic and not args.ontology_specific
+        run_extrinsic = not args.intrinsic and not args.ontology_specific
+        run_ontology_specific = not args.intrinsic and not args.extrinsic
+
+        # If specific flags are set, override defaults
+        if args.intrinsic:
+            run_intrinsic = True
+        if args.extrinsic:
+            run_extrinsic = True
+        if args.ontology_specific:
+            run_ontology_specific = True
+
+        results = {'metadata': {
+            'embeddings_file': args.embeddings,
+            'ontology_file': args.ontology,
+            'embedding_shape': evaluator.embeddings.shape,
+            'embedding_metadata': evaluator.metadata
+        }}
+
+        # Run evaluations based on selection
+        if run_intrinsic:
+            logger.info("Running intrinsic evaluation...")
+            clustering_methods = args.clustering_methods if not args.skip_clustering else []
+            intrinsic_results = evaluator.evaluate_intrinsic(
+                clustering_methods=clustering_methods,
+                n_clusters_range=args.n_clusters
+            )
+            results['intrinsic_evaluation'] = intrinsic_results
+
+        if run_extrinsic:
+            logger.info("Running extrinsic evaluation...")
+            extrinsic_results = evaluator.evaluate_extrinsic(
+                link_prediction=not args.skip_link_prediction
+            )
+            results['extrinsic_evaluation'] = extrinsic_results
+
+        if run_ontology_specific:
+            logger.info("Running ontology-specific evaluation...")
+            ont_specific_results = evaluator.evaluate_ontology_specific()
+            results['ontology_specific_evaluation'] = ont_specific_results
+
+        # Save report if path provided
+        if report_path:
+            import json
+
+            # Convert numpy arrays to lists for JSON serialization
+            def convert_numpy(obj):
+                import numpy as np
+                if isinstance(obj, np.ndarray):
+                    return obj.tolist()
+                elif isinstance(obj, (np.int64, np.int32, np.int8)):
+                    return int(obj)
+                elif isinstance(obj, (np.float64, np.float32, np.float16)):
+                    return float(obj)
+                elif isinstance(obj, np.bool_):
+                    return bool(obj)
+                elif isinstance(obj, dict):
+                    return {k: convert_numpy(v) for k, v in obj.items()}
+                elif isinstance(obj, list):
+                    return [convert_numpy(item) for item in obj]
+                else:
+                    return obj
+
+            results_serializable = convert_numpy(results)
+
+            with open(report_path, 'w') as f:
+                json.dump(results_serializable, f, indent=2)
+
+            logger.info(f"Evaluation report saved to {report_path}")
+
+        # Create visualizations if output directory specified
+        if args.output_dir and not args.no_plots:
+            logger.info("Creating visualizations...")
+            viz_paths = evaluator.visualize_evaluation_results(results, args.output_dir)
+            logger.info(f"Visualizations saved to: {args.output_dir}")
+
+        # Print summary
+        print("\n" + "="*60)
+        print("EVALUATION SUMMARY")
+        print("="*60)
+
+        # Embedding info
+        shape = results['metadata']['embedding_shape']
+        print(f"Embeddings shape: {shape[0]} nodes × {shape[1]} dimensions")
+
+        # Intrinsic metrics
+        if 'intrinsic_evaluation' in results:
+            intrinsic = results['intrinsic_evaluation']
+
+            if 'distribution' in intrinsic:
+                dist = intrinsic['distribution']
+                print(f"Mean embedding norm: {dist['norms']['mean_norm']:.3f}")
+                print(f"Mean cosine similarity: {dist['similarities']['mean_similarity']:.3f}")
+
+            if 'dimensionality' in intrinsic:
+                dim = intrinsic['dimensionality']
+                eff_dims = dim['effective_dimensions']
+                print(f"Effective dimensions (95% variance): {eff_dims['95_percent_variance']}")
+
+            if 'clustering' in intrinsic and isinstance(intrinsic['clustering'], dict):
+                clustering = intrinsic['clustering']
+                if 'kmeans' in clustering:
+                    kmeans = clustering['kmeans']
+                    best_silhouette = max([
+                        result['silhouette_score']
+                        for result in kmeans.values()
+                        if isinstance(result, dict) and 'silhouette_score' in result
+                    ], default=0.0)
+                    print(f"Best K-means silhouette score: {best_silhouette:.3f}")
+
+        # Extrinsic metrics
+        if 'extrinsic_evaluation' in results:
+            extrinsic = results['extrinsic_evaluation']
+
+            if 'link_prediction' in extrinsic:
+                link_pred = extrinsic['link_prediction']
+                if 'classifiers' in link_pred:
+                    classifiers = link_pred['classifiers']
+                    if 'logistic_regression' in classifiers:
+                        lr_results = classifiers['logistic_regression']
+                        if 'roc_auc' in lr_results:
+                            print(f"Link prediction ROC-AUC: {lr_results['roc_auc']:.3f}")
+
+            if 'hierarchy' in extrinsic:
+                hierarchy = extrinsic['hierarchy']
+                if 'similarity_difference' in hierarchy:
+                    print(f"Hierarchy preservation (similarity diff): {hierarchy['similarity_difference']:.3f}")
+
+        # Ontology-specific metrics
+        if 'ontology_specific_evaluation' in results:
+            ont_specific = results['ontology_specific_evaluation']
+
+            if 'structural_consistency' in ont_specific:
+                structural = ont_specific['structural_consistency']
+                if 'centrality_correlations' in structural:
+                    centrality = structural['centrality_correlations']
+                    if 'degree' in centrality and isinstance(centrality['degree'], dict) and 'pearson_correlation' in centrality['degree']:
+                        degree_corr = centrality['degree']['pearson_correlation']
+                        print(f"Degree centrality correlation: {degree_corr:.3f}")
+
+        print("="*60)
+
+        if report_path:
+            print(f"\nDetailed report saved to: {report_path}")
+
+        logger.info("Evaluation completed successfully")
+        return 0
+
+    except Exception as e:
+        logger.error(f"Evaluation failed: {e}")
+        if args.verbose:
+            import traceback
+            traceback.print_exc()
+        return 1
+
+
+def run_evaluate_batch_command(args):
+    """Execute the evaluate-batch command."""
+    from .evaluation import create_evaluation_benchmark
+    import logging
+    from pathlib import Path
+
+    # Set up logging
+    level = logging.DEBUG if args.verbose else logging.INFO
+    logging.basicConfig(
+        level=level,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+
+    logger = logging.getLogger(__name__)
+    logger.info("Running batch evaluation")
+
+    # Parse embedding files
+    embeddings_files = []
+    if args.embeddings_list:
+        with open(args.embeddings_list, 'r') as f:
+            embeddings_files = [line.strip() for line in f if line.strip()]
+    else:
+        embeddings_files = args.embeddings or []
+
+    # Parse ontology files
+    ontology_files = None
+    if args.ontology_list:
+        with open(args.ontology_list, 'r') as f:
+            ontology_files = [line.strip() for line in f if line.strip()]
+    elif args.ontology:
+        ontology_files = args.ontology
+
+    if not embeddings_files:
+        logger.error("No embedding files provided")
+        return 1
+
+    try:
+        # Run benchmark
+        results = create_evaluation_benchmark(
+            embeddings_files,
+            ontology_files,
+            args.output_dir
+        )
+
+        # Print summary
+        print("\n" + "="*60)
+        print("BATCH EVALUATION SUMMARY")
+        print("="*60)
+
+        successful_evaluations = [k for k, v in results.items() if 'error' not in v]
+        failed_evaluations = [k for k, v in results.items() if 'error' in v]
+
+        print(f"Successfully evaluated: {len(successful_evaluations)} files")
+        print(f"Failed evaluations: {len(failed_evaluations)} files")
+
+        if failed_evaluations:
+            print("\nFailed files:")
+            for failed_file in failed_evaluations:
+                error = results[failed_file]['error']
+                print(f"  - {failed_file}: {error}")
+
+        print(f"\nBatch results saved to: {args.output_dir}")
+        print("="*60)
+
+        logger.info("Batch evaluation completed successfully")
+        return 0
+
+    except Exception as e:
+        logger.error(f"Batch evaluation failed: {e}")
+        if args.verbose:
+            import traceback
+            traceback.print_exc()
+        return 1
+
+
 def run_compare_command(args):
     """Execute the compare command."""
     from test_edam_model import main as compare_main
@@ -621,6 +946,8 @@ def main(args: Optional[List[str]] = None):
         'hf-create': run_hf_create_command,
         'hf-test': run_hf_test_command,
         'hf-batch': run_hf_batch_command,
+        'evaluate': run_evaluate_command,
+        'evaluate-batch': run_evaluate_batch_command,
         'benchmark': run_benchmark_command,
         'compare': run_compare_command,
         'inspect': run_inspect_command,
