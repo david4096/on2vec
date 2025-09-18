@@ -13,9 +13,21 @@ This is a Python project using UV for dependency management:
 - Dependencies managed via `pyproject.toml` and `uv.lock`
 - Key dependencies: PyTorch, torch-geometric, owlready2, UMAP, matplotlib, polars
 
-To set up the environment:
+### Development Setup:
 ```bash
 uv sync
+```
+
+### User Installation:
+```bash
+# Basic installation
+pip install on2vec
+
+# With benchmarking support
+pip install on2vec[benchmark]
+
+# All features
+pip install on2vec[all]
 ```
 
 ## Core Architecture
@@ -55,56 +67,67 @@ The codebase follows a modern pipeline architecture with distinct stages:
 
 #### One-command model creation:
 ```bash
-python create_hf_model.py e2e ONTOLOGY.owl model-name
+on2vec hf ONTOLOGY.owl model-name
 ```
 
 #### Step-by-step workflow:
 ```bash
 # 1. Train ontology with text features
-python create_hf_model.py train ONTOLOGY.owl --output embeddings.parquet
+on2vec hf-train ONTOLOGY.owl --output embeddings.parquet
 
 # 2. Create HuggingFace model (auto-detects base model)
-python create_hf_model.py create embeddings.parquet model-name
+on2vec hf-create embeddings.parquet model-name
 
 # 3. Test model
-python create_hf_model.py test ./hf_models/model-name
+on2vec hf-test ./hf_models/model-name
 
-# 4. Get upload instructions
-python create_hf_model.py upload-info ./hf_models/model-name
+# 4. Inspect model details
+on2vec inspect ./hf_models/model-name
 ```
 
 #### Batch processing:
 ```bash
-python batch_hf_models.py process owl_files/ ./output --max-workers 4
+on2vec hf-batch owl_files/ ./output --max-workers 4
 ```
 
 ### MTEB Benchmarking
 
 #### Quick benchmark:
 ```bash
-python mteb_benchmarks/benchmark_runner.py ./hf_models/model-name --quick
+on2vec benchmark ./hf_models/model-name --quick
 ```
 
 #### Full MTEB evaluation:
 ```bash
-python mteb_benchmarks/benchmark_runner.py ./hf_models/model-name
+on2vec benchmark ./hf_models/model-name
+```
+
+#### Model comparison:
+```bash
+on2vec compare ./hf_models/model-name --detailed
 ```
 
 ### Core on2vec Commands
 
-#### Generate embeddings from single OWL file:
+#### Train models:
 ```bash
-python main.py ONTOLOGY.owl --model_type gcn --hidden_dim 128 --out_dim 64 --epochs 100 --output embeddings.parquet
+on2vec train ONTOLOGY.owl --output embeddings.parquet --model-type gcn --hidden-dim 128 --out-dim 64 --epochs 100
+```
+
+#### Generate embeddings from trained models:
+```bash
+on2vec embed model.pt ONTOLOGY.owl --output embeddings.parquet
 ```
 
 #### Visualize embeddings:
 ```bash
-python viz.py embeddings.parquet --neighbors 15 --min_dist 0.1 --output visualization.png
+on2vec visualize embeddings.parquet --neighbors 15 --min-dist 0.1 --output visualization.png
 ```
 
-### Process entire directory of OWL files:
+#### Inspect and convert files:
 ```bash
-python process_dir.py owl_files/ --model_type gcn --hidden_dim 128 --out_dim 64 --epochs 100 --output_dir output/
+on2vec inspect embeddings.parquet
+on2vec convert embeddings.parquet embeddings.csv
 ```
 
 ### Generate force-directed layouts:

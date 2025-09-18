@@ -4,11 +4,17 @@ A toolkit for generating vector embeddings from OWL ontologies using Graph Neura
 
 ## 🚀 Quick Start
 
+### Installation
+
+```bash
+pip install on2vec
+```
+
 Create production-ready Sentence Transformers models with ontology knowledge in **one command**:
 
 ```bash
 # Complete end-to-end workflow
-python create_hf_model.py e2e biomedical.owl my-biomedical-model
+on2vec hf biomedical.owl my-biomedical-model
 ```
 
 **Use like any sentence transformer:**
@@ -30,10 +36,25 @@ embeddings = model.encode(['heart disease', 'cardiovascular problems'])
 
 ## 📥 Installation
 
+### From PyPI (Recommended)
+
+```bash
+# Basic installation
+pip install on2vec
+
+# With MTEB benchmarking support
+pip install on2vec[benchmark]
+
+# With all optional dependencies
+pip install on2vec[all]
+```
+
+### From Source
+
 ```bash
 git clone <repository-url>
 cd on2vec
-uv sync
+pip install -e .
 ```
 
 ### Dependencies
@@ -48,10 +69,10 @@ uv sync
 
 ```bash
 # Create complete model with auto-generated documentation
-python create_hf_model.py e2e ontology.owl model-name
+on2vec hf ontology.owl model-name
 
 # With custom settings
-python create_hf_model.py e2e ontology.owl model-name \
+on2vec hf ontology.owl model-name \
   --base-model all-mpnet-base-v2 \
   --fusion gated \
   --epochs 200
@@ -61,23 +82,23 @@ python create_hf_model.py e2e ontology.owl model-name \
 
 ```bash
 # 1. Train ontology embeddings
-python create_hf_model.py train ontology.owl --output embeddings.parquet
+on2vec hf-train ontology.owl --output embeddings.parquet
 
 # 2. Create HuggingFace model (auto-detects base model)
-python create_hf_model.py create embeddings.parquet model-name
+on2vec hf-create embeddings.parquet model-name
 
 # 3. Test model functionality
-python create_hf_model.py test ./hf_models/model-name
+on2vec hf-test ./hf_models/model-name
 
-# 4. Get upload instructions
-python create_hf_model.py upload-info ./hf_models/model-name
+# 4. Inspect model details
+on2vec inspect ./hf_models/model-name
 ```
 
 ### Batch Processing
 
 ```bash
 # Process multiple ontologies
-python batch_hf_models.py process owl_files/ ./output \
+on2vec hf-batch owl_files/ ./output \
   --base-models all-MiniLM-L6-v2 all-mpnet-base-v2 \
   --fusion-methods concat gated \
   --max-workers 4
@@ -100,25 +121,24 @@ Evaluate your models against the Massive Text Embedding Benchmark:
 
 ```bash
 # Fast evaluation on subset of tasks
-python mteb_benchmarks/benchmark_runner.py ./hf_models/my-model --quick
+on2vec benchmark ./hf_models/my-model --quick
 
 # Focus on specific task types
-python mteb_benchmarks/benchmark_runner.py ./hf_models/my-model \
-  --task-types STS Classification
+on2vec benchmark ./hf_models/my-model --task-types STS Classification
 
 # Full MTEB benchmark
-python mteb_benchmarks/benchmark_runner.py ./hf_models/my-model
+on2vec benchmark ./hf_models/my-model
 ```
 
 ### Compare Models
 
 ```bash
 # Benchmark vanilla baseline
-python mteb_benchmarks/benchmark_runner.py sentence-transformers/all-MiniLM-L6-v2 \
+on2vec benchmark sentence-transformers/all-MiniLM-L6-v2 \
   --model-name vanilla-baseline --quick
 
-# Compare with your ontology-augmented model
-python mteb_benchmarks/benchmark_runner.py ./hf_models/my-model --quick
+# Compare ontology vs vanilla models
+on2vec compare ./hf_models/my-model --detailed
 ```
 
 ### Features
@@ -135,23 +155,27 @@ python mteb_benchmarks/benchmark_runner.py ./hf_models/my-model --quick
 
 ```bash
 # Train GCN model
-python main.py ontology.owl --model_type gcn --epochs 100
+on2vec train ontology.owl --output model.pt --model-type gcn --epochs 100
 
 # Train with text features (for HuggingFace integration)
-python main.py ontology.owl --use_text_features --output embeddings.parquet
+on2vec train ontology.owl --output embeddings.parquet --use-text-features
 
 # Multi-relation models with all ObjectProperties
-python main.py ontology.owl --use_multi_relation --model_type rgcn
+on2vec train ontology.owl --output model.pt --use-multi-relation --model-type rgcn
+```
+
+### Generate Embeddings
+
+```bash
+# Generate embeddings from trained model
+on2vec embed model.pt ontology.owl --output embeddings.parquet
 ```
 
 ### Visualization
 
 ```bash
 # Create UMAP visualization
-python viz.py embeddings.parquet --output visualization.png
-
-# Process entire directory
-python process_dir.py owl_files/ --model_type gcn --epochs 100
+on2vec visualize embeddings.parquet --output visualization.png
 ```
 
 ### Python API
@@ -230,16 +254,22 @@ Text Features → Sentence Transformer → Text Embeddings
 ## 🚀 Example Workflow
 
 ```bash
-# 1. Create a model from biomedical ontology
-python create_hf_model.py e2e EDAM.owl edam-biomedical
+# 1. Install on2vec
+pip install on2vec[benchmark]
 
-# 2. Quick benchmark evaluation
-python mteb_benchmarks/benchmark_runner.py ./hf_models/edam-biomedical --quick
+# 2. Create a model from biomedical ontology
+on2vec hf EDAM.owl edam-biomedical
 
-# 3. Test on domain-specific terms
-python test_edam_model.py
+# 3. Quick benchmark evaluation
+on2vec benchmark ./hf_models/edam-biomedical --quick
 
-# 4. Upload to HuggingFace Hub (instructions auto-generated)
+# 4. Compare with vanilla models
+on2vec compare ./hf_models/edam-biomedical --detailed
+
+# 5. Inspect model details
+on2vec inspect ./hf_models/edam-biomedical
+
+# 6. Upload to HuggingFace Hub (instructions auto-generated)
 # See ./hf_models/edam-biomedical/UPLOAD_INSTRUCTIONS.md
 ```
 
