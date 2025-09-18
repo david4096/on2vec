@@ -110,16 +110,18 @@ def evaluate_predictions(pairs, y_true, y_pred):
         "frank_auc": frank_auc
     }
     
-def evaluate_embeddings(ontology, embeddings_df):
+def evaluate_embeddings(ontology, embeddings_df, relationship =['interacts_with']):
     # Example usage
     embeddings_dict = {}
     for _, row in embeddings_df.iterrows():
         embeddings_dict[row['node_id']] = np.array(row['embedding'])
-
+    nodes_set = set()
     nodes = []
     for cls in ontology.classes():
-        if hasattr(cls, 'interacts_with') and cls.iri in embeddings_dict:
-            nodes.append(cls)
+        for rel in relationship:
+            if hasattr(cls, rel) and cls.iri in embeddings_dict:
+                nodes_set.add(cls)
+    nodes=list(nodes_set)
     print("Ontology Classes:", len(nodes))
     nodes_dict = {node.iri: idx for idx, node in enumerate(nodes)}
     embeds = np.zeros((len(nodes), len(embeddings_df['embedding'].iloc[0])), dtype=np.float32)
@@ -128,10 +130,11 @@ def evaluate_embeddings(ontology, embeddings_df):
     y_true = np.zeros((len(nodes), len(nodes)), dtype=np.int32)
     pairs = []
     for node1 in nodes:
-        for node2 in node1.interacts_with:
-            if node1.iri != node2.iri:
-                y_true[nodes_dict[node1.iri], nodes_dict[node2.iri]] = 1
-                pairs.append((nodes_dict[node1.iri], nodes_dict[node2.iri]))
+        for rel in relationship:
+            for node2 in getattr(node1, rel):
+                if node1.iri != node2.iri:
+                    y_true[nodes_dict[node1.iri], nodes_dict[node2.iri]] = 1
+                    pairs.append((nodes_dict[node1.iri], nodes_dict[node2.iri]))
     print("Positive pairs:", len(pairs))
     # Load embeddings
     y_pred = cosine_similarity(embeds)
