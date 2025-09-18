@@ -1,3 +1,47 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
 *.pyc
 .DS_Store
 *.bak
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Unit test / coverage reports
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Environments
+.venv
+venv/
+.env
+
+# Project-specific large data files
+*.owl
+*.parquet
+*.pt
+*.png
+*.gif
+*.csv
+*.log
+
+# Large data directories
+output/
+owl_files/
+hf_models/
+benchmark_results/
+evaluation_results/
+mteb_benchmarks/
+ppi_yeast/
+saved_models/
+.ipynb_checkpoints/
+
+# Jupyter Notebook
+*.ipynb
