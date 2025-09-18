@@ -25,8 +25,10 @@ This single command:
 1. ✅ Trains ontology with text features
 2. ✅ Generates multi-embedding files
 3. ✅ Creates HuggingFace compatible model
-4. ✅ Tests the model
-5. ✅ Shows upload instructions
+4. ✅ Auto-generates comprehensive model card with metadata
+5. ✅ Creates upload instructions
+6. ✅ Tests the model
+7. ✅ Ready for HuggingFace Hub upload
 
 ### Option 2: Step-by-Step Workflow
 
@@ -217,6 +219,90 @@ model = SentenceTransformer("your-username/biomedical-ontology-embedder")
 
 # Works with all sentence-transformers features
 embeddings = model.encode(["heart disease", "protein folding"])
+```
+
+## Model Cards and Documentation
+
+Every model created with on2vec automatically includes comprehensive documentation:
+
+### Auto-Generated Model Card
+
+```bash
+# Model card automatically created during model generation
+ls ./hf_models/my-model/README.md
+```
+
+The model card includes:
+- ✅ **Complete technical specifications** extracted from training metadata
+- ✅ **HuggingFace YAML frontmatter** with proper tags for discoverability
+- ✅ **Architecture details** including GNN type, dimensions, fusion method
+- ✅ **Domain information** auto-detected from ontology filename
+- ✅ **Training statistics** including concept count, alignment ratios
+- ✅ **Usage examples** and code snippets
+- ✅ **Performance characteristics** including model and ontology sizes
+
+### Upload Instructions
+
+```bash
+# Upload instructions automatically generated
+ls ./hf_models/my-model/UPLOAD_INSTRUCTIONS.md
+```
+
+Contains step-by-step instructions for:
+- Installing dependencies
+- HuggingFace Hub authentication
+- Python upload script
+- Manual upload alternatives
+
+## MTEB Benchmarking
+
+Evaluate your ontology-augmented models against standard benchmarks:
+
+### Quick Evaluation
+
+```bash
+# Fast benchmark on subset of tasks
+python mteb_benchmarks/benchmark_runner.py ./hf_models/my-model --quick
+
+# Focus on semantic similarity tasks (ideal for ontology models)
+python mteb_benchmarks/benchmark_runner.py ./hf_models/my-model \
+  --task-types STS
+
+# Full MTEB benchmark (58+ tasks)
+python mteb_benchmarks/benchmark_runner.py ./hf_models/my-model
+```
+
+### Comparative Analysis
+
+```bash
+# Benchmark vanilla baseline
+python mteb_benchmarks/benchmark_runner.py sentence-transformers/all-MiniLM-L6-v2 \
+  --model-name vanilla-baseline --quick
+
+# Compare with your ontology model
+python mteb_benchmarks/benchmark_runner.py ./hf_models/my-model \
+  --model-name ontology-augmented --quick
+
+# Results saved in mteb_results/ with detailed reports
+```
+
+### Benchmark Results
+
+Each benchmark generates:
+- **JSON summary** with detailed metrics per task
+- **Markdown report** with category averages and interpretations
+- **Task-specific results** for granular analysis
+
+Example results structure:
+```
+mteb_results/
+├── my-model/
+│   ├── benchmark_summary.json      # Complete results
+│   ├── benchmark_report.md         # Human-readable report
+│   └── STS12.json                 # Individual task results
+└── vanilla-baseline/
+    ├── benchmark_summary.json
+    └── benchmark_report.md
 ```
 
 ## Advanced Usage Examples
