@@ -869,7 +869,7 @@ def run_hf_batch_command(args):
             logger.info("Custom model metadata configured")
 
         # Use existing batch processing
-        from batch_hf_models import batch_process_ontologies
+        from .batch_hf_models import batch_process_ontologies
         results = batch_process_ontologies(
             owl_directory=args.input_dir,
             output_directory=args.output_dir,
@@ -886,12 +886,12 @@ def run_hf_batch_command(args):
         )
 
         # Print summary
-        from batch_hf_models import print_summary_report
+        from .batch_hf_models import print_summary_report
         print_summary_report(results)
 
         # Create collection if requested
         if args.create_collection:
-            from batch_hf_models import create_model_collection
+            from .batch_hf_models import create_model_collection
             collection_path = create_model_collection(
                 summary=results,
                 collection_name=args.create_collection,
