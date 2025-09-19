@@ -1195,15 +1195,20 @@ def run_evaluate_batch_command(args):
 
 def run_compare_command(args):
     """Execute the compare command."""
-    from test_edam_model import main as compare_main
+    from .model_comparison import main_compare
 
-    # For now, use the existing comparison script
-    # Could be enhanced to be more generic
-    sys.argv = ['test_edam_model.py']
-    if args.detailed:
-        sys.argv.append('--detailed')
-
-    return compare_main()
+    # Use the generic model comparison module
+    try:
+        success = main_compare(
+            ontology_model_path=args.model_path,
+            vanilla_model_path=args.vanilla_model,
+            domain_terms=args.domain_terms,
+            detailed=args.detailed
+        )
+        return 0 if success else 1
+    except Exception as e:
+        print(f"❌ Model comparison failed: {e}")
+        return 1
 
 
 def run_inspect_command(args):
