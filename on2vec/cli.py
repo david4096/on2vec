@@ -854,6 +854,9 @@ def run_hf_batch_command(args):
         upload_options['hub_name_template'] = args.hub_name_template or "your-username/{ontology_name}-{config_id}"
         upload_options['private'] = args.private
         upload_options['commit_message'] = args.commit_message
+    elif args.hub_name_template:
+        # Even if not uploading, preserve template for upload instructions
+        upload_options['hub_name_template'] = args.hub_name_template
 
     # Build collection options
     collection_options = {}

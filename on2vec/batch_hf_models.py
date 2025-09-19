@@ -139,6 +139,21 @@ def process_single_ontology(
 
         # Step 2: Create HF model
         logger.info(f"Creating HF model for {ontology_name}")
+
+        # Process upload options template if present
+        processed_upload_options = None
+        if upload_options:
+            processed_upload_options = upload_options.copy()
+            if 'hub_name_template' in upload_options:
+                # Replace template placeholders with actual values
+                hub_name = upload_options['hub_name_template'].format(
+                    ontology_name=ontology_name,
+                    config_id=config_id
+                )
+                processed_upload_options['hub_name'] = hub_name
+                # Remove the template key since we now have the actual hub_name
+                processed_upload_options.pop('hub_name_template', None)
+
         actual_model_dir = create_hf_model(
             embeddings_file=str(embeddings_file),
             model_name=f"{ontology_name}_{config_id}",
@@ -147,7 +162,7 @@ def process_single_ontology(
             fusion_method=config['fusion_method'],
             ontology_file=str(owl_file),
             model_details=model_details,
-            upload_options=upload_options
+            upload_options=processed_upload_options
         )
 
         # Step 3: Test model

@@ -7,13 +7,15 @@ import torch.nn.functional as F
 from torch_geometric.nn import GCNConv, GATConv, RGCNConv
 import logging
 
+from .device_utils import get_device, move_to_device
+
 logger = logging.getLogger(__name__)
 
 
 class OntologyGNN(torch.nn.Module):
     """Graph Neural Network for learning ontology embeddings."""
 
-    def __init__(self, input_dim, hidden_dim, out_dim, model_type='gcn'):
+    def __init__(self, input_dim, hidden_dim, out_dim, model_type='gcn', device=None):
         """
         Initialize the GNN model.
 
@@ -22,12 +24,16 @@ class OntologyGNN(torch.nn.Module):
             hidden_dim (int): Hidden layer dimension
             out_dim (int): Output embedding dimension
             model_type (str): Type of GNN ('gcn' or 'gat')
+            device (str or torch.device, optional): Device to place model on
         """
         super(OntologyGNN, self).__init__()
         self.model_type = model_type
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
         self.out_dim = out_dim
+
+        # Set up device
+        self.device = get_device(device, verbose=False)
 
         if model_type == 'gcn':
             self.conv1 = GCNConv(input_dim, hidden_dim)
@@ -37,6 +43,9 @@ class OntologyGNN(torch.nn.Module):
             self.conv2 = GATConv(hidden_dim, out_dim)
         else:
             raise ValueError("Unsupported model type. Use 'gcn' or 'gat'.")
+
+        # Move model to device
+        self.to(self.device)
 
     def forward(self, x, edge_index):
         """
@@ -49,6 +58,10 @@ class OntologyGNN(torch.nn.Module):
         Returns:
             torch.Tensor: Node embeddings
         """
+        # Ensure inputs are on the same device as model
+        x = x.to(self.device)
+        edge_index = edge_index.to(self.device)
+
         x = self.conv1(x, edge_index)
         x = F.relu(x)
         x = self.conv2(x, edge_index)
@@ -62,7 +75,7 @@ class MultiRelationOntologyGNN(torch.nn.Module):
     """
 
     def __init__(self, input_dim, hidden_dim, out_dim, num_relations, model_type='rgcn',
-                 num_bases=None, dropout=0.0):
+                 num_bases=None, dropout=0.0, device=None):
         """
         Initialize the Multi-Relation GNN model.
 
@@ -74,6 +87,7 @@ class MultiRelationOntologyGNN(torch.nn.Module):
             model_type (str): Type of multi-relation GNN ('rgcn' or 'weighted_gcn')
             num_bases (int, optional): Number of bases for RGCN decomposition
             dropout (float): Dropout rate
+            device (str or torch.device, optional): Device to place model on
         """
         super(MultiRelationOntologyGNN, self).__init__()
         self.model_type = model_type
@@ -82,6 +96,9 @@ class MultiRelationOntologyGNN(torch.nn.Module):
         self.out_dim = out_dim
         self.num_relations = num_relations
         self.dropout = dropout
+
+        # Set up device
+        self.device = get_device(device, verbose=False)
 
         logger.info(f"Initializing {model_type} model with {num_relations} relation types")
 
@@ -101,6 +118,9 @@ class MultiRelationOntologyGNN(torch.nn.Module):
         else:
             raise ValueError("Unsupported model type. Use 'rgcn' or 'weighted_gcn'.")
 
+        # Move model to device
+        self.to(self.device)
+
     def forward(self, x, edge_index, edge_type=None):
         """
         Forward pass of the Multi-Relation GNN.
@@ -113,6 +133,12 @@ class MultiRelationOntologyGNN(torch.nn.Module):
         Returns:
             torch.Tensor: Node embeddings [num_nodes, out_dim]
         """
+        # Ensure inputs are on the same device as model
+        x = x.to(self.device)
+        edge_index = edge_index.to(self.device)
+        if edge_type is not None:
+            edge_type = edge_type.to(self.device)
+
         if self.model_type == 'rgcn':
             # RGCN can handle edge types directly
             if edge_type is None:
@@ -158,7 +184,7 @@ class HeterogeneousOntologyGNN(torch.nn.Module):
     with separate message passing for each relation type.
     """
 
-    def __init__(self, input_dim, hidden_dim, out_dim, relation_types, dropout=0.0):
+    def __init__(self, input_dim, hidden_dim, out_dim, relation_types, dropout=0.0, device=None):
         """
         Initialize the Heterogeneous GNN model.
 
@@ -168,6 +194,7 @@ class HeterogeneousOntologyGNN(torch.nn.Module):
             out_dim (int): Output embedding dimension
             relation_types (list): List of relation type names/identifiers
             dropout (float): Dropout rate
+            device (str or torch.device, optional): Device to place model on
         """
         super(HeterogeneousOntologyGNN, self).__init__()
         self.input_dim = input_dim
@@ -176,6 +203,9 @@ class HeterogeneousOntologyGNN(torch.nn.Module):
         self.relation_types = relation_types
         self.num_relations = len(relation_types)
         self.dropout = dropout
+
+        # Set up device
+        self.device = get_device(device, verbose=False)
 
         logger.info(f"Initializing heterogeneous model with {self.num_relations} relation types")
 
@@ -192,6 +222,9 @@ class HeterogeneousOntologyGNN(torch.nn.Module):
         # Attention mechanism to combine different relation embeddings
         self.attention = torch.nn.Linear(out_dim, 1)
 
+        # Move model to device
+        self.to(self.device)
+
     def forward(self, x, edge_index, edge_type, relation_to_index):
         """
         Forward pass of the Heterogeneous GNN.
@@ -205,6 +238,11 @@ class HeterogeneousOntologyGNN(torch.nn.Module):
         Returns:
             torch.Tensor: Node embeddings
         """
+        # Ensure inputs are on the same device as model
+        x = x.to(self.device)
+        edge_index = edge_index.to(self.device)
+        edge_type = edge_type.to(self.device)
+
         # Separate edges by relation type
         relation_embeddings = []
         index_to_relation = {v: k for k, v in relation_to_index.items()}
@@ -253,7 +291,7 @@ class TextAugmentedOntologyGNN(torch.nn.Module):
 
     def __init__(self, structural_dim, text_dim, hidden_dim, out_dim,
                  model_type='gcn', fusion_method='concat', dropout=0.0,
-                 num_relations=None, relation_types=None, num_bases=None):
+                 num_relations=None, relation_types=None, num_bases=None, device=None):
         """
         Initialize the Text-Augmented GNN model.
 
@@ -268,6 +306,7 @@ class TextAugmentedOntologyGNN(torch.nn.Module):
             num_relations (int, optional): Number of relations (for rgcn, weighted_gcn)
             relation_types (list, optional): List of relation types (for heterogeneous)
             num_bases (int, optional): Number of bases for RGCN decomposition
+            device (str or torch.device, optional): Device to place model on
         """
         super(TextAugmentedOntologyGNN, self).__init__()
         self.structural_dim = structural_dim
@@ -350,6 +389,10 @@ class TextAugmentedOntologyGNN(torch.nn.Module):
 
         logger.info(f"Initialized TextAugmentedOntologyGNN: {fusion_method} fusion, {model_type} backbone")
 
+        # Set up device and move model
+        self.device = get_device(device, verbose=False)
+        self.to(self.device)
+
     def forward(self, structural_x, text_x, edge_index, edge_type=None, relation_to_index=None):
         """
         Forward pass combining structural and textual features.
@@ -364,6 +407,13 @@ class TextAugmentedOntologyGNN(torch.nn.Module):
         Returns:
             torch.Tensor: Node embeddings
         """
+        # Ensure inputs are on the same device as model
+        structural_x = structural_x.to(self.device)
+        text_x = text_x.to(self.device)
+        edge_index = edge_index.to(self.device)
+        if edge_type is not None:
+            edge_type = edge_type.to(self.device)
+
         # Fuse structural and text features
         if self.fusion_method == 'concat':
             x = torch.cat([structural_x, text_x], dim=1)

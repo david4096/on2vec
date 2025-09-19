@@ -6,11 +6,12 @@ import torch
 import logging
 from .training import load_model_checkpoint
 from .ontology import build_graph_from_owl, build_multi_relation_graph_from_owl, align_ontology_with_training
+from .device_utils import get_device, move_to_device
 
 logger = logging.getLogger(__name__)
 
 
-def generate_embeddings_from_model(model, x, edge_index, new_to_training_idx=None, node_ids=None, edge_type=None, relation_to_index=None, text_x=None):
+def generate_embeddings_from_model(model, x, edge_index, new_to_training_idx=None, node_ids=None, edge_type=None, relation_to_index=None, text_x=None, device=None):
     """
     Generate embeddings using a trained model.
 
@@ -23,6 +24,7 @@ def generate_embeddings_from_model(model, x, edge_index, new_to_training_idx=Non
         edge_type (torch.Tensor, optional): Edge types for multi-relation models
         relation_to_index (dict, optional): Mapping from relation names to indices
         text_x (torch.Tensor, optional): Text features for TextAugmentedOntologyGNN
+        device (str or torch.device, optional): Device to use for inference
 
     Returns:
         tuple: (embeddings, used_node_ids, extra_info)
@@ -30,6 +32,25 @@ def generate_embeddings_from_model(model, x, edge_index, new_to_training_idx=Non
             - used_node_ids (list): Node IDs corresponding to embeddings
             - extra_info (dict): Additional information including separate embeddings
     """
+    # Get device (use model's device if available, otherwise auto-detect)
+    if device is None:
+        if hasattr(model, 'device'):
+            inference_device = model.device
+        else:
+            inference_device = get_device('auto', verbose=False)
+            model = model.to(inference_device)
+    else:
+        inference_device = get_device(device, verbose=False)
+        model = model.to(inference_device)
+
+    # Move data to device
+    x = move_to_device(x, inference_device)
+    edge_index = move_to_device(edge_index, inference_device)
+    if edge_type is not None:
+        edge_type = move_to_device(edge_type, inference_device)
+    if text_x is not None:
+        text_x = move_to_device(text_x, inference_device)
+
     logger.info("Generating embeddings...")
 
     model.eval()
@@ -147,7 +168,7 @@ def generate_embeddings_from_model(model, x, edge_index, new_to_training_idx=Non
             return all_embeddings, node_ids, extra_info
 
 
-def embed_ontology_with_model(model_path, owl_file, output_file=None):
+def embed_ontology_with_model(model_path, owl_file, output_file=None, device=None):
     """
     Generate embeddings for an ontology using a pre-trained model.
 
@@ -155,6 +176,7 @@ def embed_ontology_with_model(model_path, owl_file, output_file=None):
         model_path (str): Path to trained model checkpoint
         owl_file (str): Path to OWL ontology file
         output_file (str, optional): Path to save embeddings
+        device (str or torch.device, optional): Device to use for inference
 
     Returns:
         dict: Dictionary containing embeddings and metadata
@@ -213,7 +235,7 @@ def embed_ontology_with_model(model_path, owl_file, output_file=None):
     # Generate embeddings
     embeddings, node_ids, extra_info = generate_embeddings_from_model(
         model, x, edge_index, new_to_training_idx, training_node_ids,
-        edge_type=edge_type, relation_to_index=relation_to_index
+        edge_type=edge_type, relation_to_index=relation_to_index, device=device
     )
 
     # Add text model info from checkpoint if not already present
@@ -255,7 +277,7 @@ def embed_ontology_with_model(model_path, owl_file, output_file=None):
     return result
 
 
-def embed_same_ontology(model_path, owl_file, output_file=None):
+def embed_same_ontology(model_path, owl_file, output_file=None, device=None):
     """
     Generate embeddings for the same ontology used in training.
     This is more efficient as it doesn't require alignment.
@@ -264,6 +286,7 @@ def embed_same_ontology(model_path, owl_file, output_file=None):
         model_path (str): Path to trained model checkpoint
         owl_file (str): Path to OWL ontology file (same as training)
         output_file (str, optional): Path to save embeddings
+        device (str or torch.device, optional): Device to use for inference
 
     Returns:
         dict: Dictionary containing embeddings and metadata
@@ -341,7 +364,7 @@ def embed_same_ontology(model_path, owl_file, output_file=None):
     embeddings, node_ids, extra_info = generate_embeddings_from_model(
         model, x, edge_index, node_ids=training_node_ids,
         edge_type=edge_type, relation_to_index=relation_to_index,
-        text_x=text_x
+        text_x=text_x, device=device
     )
 
     # Add text model info from checkpoint if not already present
