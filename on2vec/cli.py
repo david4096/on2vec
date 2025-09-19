@@ -11,11 +11,27 @@ This provides a single entry point for all on2vec functionality:
 
 import sys
 import argparse
+import time
 from typing import List, Optional
 from pathlib import Path
 
 # Add the project root to the path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
+
+# Import CLI utilities
+from .cli_utils import (
+    validate_file_exists,
+    validate_directory_exists,
+    validate_model_compatibility,
+    display_configuration,
+    print_success_summary,
+    handle_cli_error,
+    ProgressTracker,
+    with_progress_tracking,
+    print_command_examples,
+    Emoji
+)
+from .config import load_config_file, find_default_config, merge_config_with_args, save_sample_config
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -23,11 +39,29 @@ def create_parser() -> argparse.ArgumentParser:
 
     parser = argparse.ArgumentParser(
         prog='on2vec',
-        description='Generate vector embeddings from OWL ontologies using Graph Neural Networks',
-        epilog='For more help on a specific command, use: on2vec <command> --help'
+        description='Generate vector embeddings from OWL ontologies using Graph Neural Networks with HuggingFace integration',
+        epilog='''For more help on a specific command, use: on2vec <command> --help
+
+🚀 Quick start:
+  on2vec hf biomedical.owl my-model     # Create HuggingFace model
+  on2vec train onto.owl -o model.pt     # Train GNN model
+  on2vec benchmark ./hf_models/model    # Run MTEB benchmarks
+
+💡 Command shortcuts: t=train, e=embed, v=visualize, b=benchmark, i=inspect''',
+        formatter_class=argparse.RawDescriptionHelpFormatter
     )
 
-    parser.add_argument('--version', action='version', version='on2vec 0.1.0')
+    # Get version info with dependencies
+    try:
+        import torch
+        import sentence_transformers
+        version_info = f'on2vec 0.1.0 (PyTorch {torch.__version__}, sentence-transformers {sentence_transformers.__version__})'
+    except ImportError:
+        version_info = 'on2vec 0.1.0'
+
+    parser.add_argument('--version', action='version', version=version_info)
+    parser.add_argument('--config', help='Configuration file path (YAML or JSON)')
+    parser.add_argument('--save-config', help='Save sample configuration file and exit', metavar='PATH')
 
     # Create subparsers for different commands
     subparsers = parser.add_subparsers(
@@ -67,24 +101,31 @@ def setup_train_parser(subparsers):
     train_parser = subparsers.add_parser(
         'train',
         help='Train GNN models on OWL ontologies',
-        description='Train Graph Neural Network models on OWL ontology structures'
+        description='Train Graph Neural Network models on OWL ontology structures',
+        epilog='''examples:
+  on2vec train ontology.owl --output model.pt
+  on2vec train bio.owl -o bio_model.pt --model-type gat --epochs 200
+  on2vec train onto.owl -o text_model.pt --use-text-features --text-model all-mpnet-base-v2''',
+        formatter_class=argparse.RawDescriptionHelpFormatter
     )
 
     train_parser.add_argument('ontology', help='Path to OWL ontology file')
     train_parser.add_argument('--output', '-o', required=True, help='Output model file path')
     train_parser.add_argument('--model-type', choices=['gcn', 'gat', 'rgcn', 'heterogeneous'],
-                              default='gcn', help='GNN model architecture')
-    train_parser.add_argument('--hidden-dim', type=int, default=128, help='Hidden layer dimensions')
-    train_parser.add_argument('--out-dim', type=int, default=64, help='Output embedding dimensions')
-    train_parser.add_argument('--epochs', type=int, default=100, help='Training epochs')
+                              default='gcn', help='GNN model architecture (default: %(default)s)')
+    train_parser.add_argument('--hidden-dim', type=int, default=128, help='Hidden layer dimensions (default: %(default)s)')
+    train_parser.add_argument('--out-dim', type=int, default=64, help='Output embedding dimensions (default: %(default)s)')
+    train_parser.add_argument('--epochs', type=int, default=100, help='Training epochs (default: %(default)s)')
     train_parser.add_argument('--loss-fn', choices=['triplet', 'contrastive', 'cosine', 'cross_entropy'],
-                              default='triplet', help='Loss function')
+                              default='triplet', help='Loss function (default: %(default)s)')
     train_parser.add_argument('--use-multi-relation', action='store_true',
                               help='Include all ObjectProperty relations')
     train_parser.add_argument('--use-text-features', action='store_true',
                               help='Include text features from ontology')
     train_parser.add_argument('--text-model', default='all-MiniLM-L6-v2',
-                              help='Text model for semantic features')
+                              help='Text model for semantic features (default: %(default)s)')
+    train_parser.add_argument('--verbose', '-v', action='store_true', help='Enable verbose output')
+    train_parser.add_argument('--quiet', '-q', action='store_true', help='Suppress non-essential output')
 
 
 def setup_embed_parser(subparsers):
@@ -92,12 +133,18 @@ def setup_embed_parser(subparsers):
     embed_parser = subparsers.add_parser(
         'embed',
         help='Generate embeddings using trained models',
-        description='Generate embeddings for ontology concepts using pre-trained GNN models'
+        description='Generate embeddings for ontology concepts using pre-trained GNN models',
+        epilog='''examples:
+  on2vec embed model.pt ontology.owl --output embeddings.parquet
+  on2vec embed trained_model.pt different_onto.owl -o cross_embeddings.parquet''',
+        formatter_class=argparse.RawDescriptionHelpFormatter
     )
 
     embed_parser.add_argument('model', help='Path to trained model file')
     embed_parser.add_argument('ontology', help='Path to OWL ontology file')
     embed_parser.add_argument('--output', '-o', required=True, help='Output embeddings file (.parquet)')
+    embed_parser.add_argument('--verbose', '-v', action='store_true', help='Enable verbose output')
+    embed_parser.add_argument('--quiet', '-q', action='store_true', help='Suppress non-essential output')
 
 
 def setup_visualize_parser(subparsers):
@@ -105,13 +152,17 @@ def setup_visualize_parser(subparsers):
     viz_parser = subparsers.add_parser(
         'visualize',
         help='Create visualizations of embeddings',
-        description='Generate UMAP visualizations and other plots from embedding files'
+        description='Generate UMAP visualizations and other plots from embedding files',
+        epilog='''examples:
+  on2vec visualize embeddings.parquet
+  on2vec visualize embeddings.parquet --output viz.png --neighbors 20 --min-dist 0.05''',
+        formatter_class=argparse.RawDescriptionHelpFormatter
     )
 
     viz_parser.add_argument('embeddings', help='Path to embeddings file (.parquet)')
     viz_parser.add_argument('--output', '-o', help='Output visualization file (.png)')
-    viz_parser.add_argument('--neighbors', type=int, default=15, help='UMAP n_neighbors parameter')
-    viz_parser.add_argument('--min-dist', type=float, default=0.1, help='UMAP min_dist parameter')
+    viz_parser.add_argument('--neighbors', type=int, default=15, help='UMAP n_neighbors parameter (default: %(default)s)')
+    viz_parser.add_argument('--min-dist', type=float, default=0.1, help='UMAP min_dist parameter (default: %(default)s)')
 
 
 def setup_hf_parser(subparsers):
@@ -119,27 +170,33 @@ def setup_hf_parser(subparsers):
     hf_parser = subparsers.add_parser(
         'hf',
         help='Create HuggingFace sentence-transformers models (end-to-end)',
-        description='Complete workflow: train ontology → create HuggingFace model → test → prepare for upload'
+        description='Complete workflow: train ontology → create HuggingFace model → test → prepare for upload',
+        epilog='''examples:
+  on2vec hf biomedical.owl my-bio-model
+  on2vec hf ontology.owl advanced-model --base-model all-mpnet-base-v2 --fusion attention --epochs 200
+  on2vec hf onto.owl public-model --upload --hub-name username/my-ontology-model
+  on2vec hf complex.owl model --author "Your Name" --description "Custom ontology embeddings"''',
+        formatter_class=argparse.RawDescriptionHelpFormatter
     )
 
     hf_parser.add_argument('ontology', help='Path to OWL ontology file')
     hf_parser.add_argument('model_name', help='Name for the HuggingFace model')
-    hf_parser.add_argument('--output-dir', default='./hf_models', help='Output directory for models')
+    hf_parser.add_argument('--output-dir', default='./hf_models', help='Output directory for models (default: %(default)s)')
     hf_parser.add_argument('--base-model', help='Base sentence transformer model')
     hf_parser.add_argument('--fusion', choices=['concat', 'attention', 'gated', 'weighted_avg'],
-                           default='concat', help='Fusion method for combining embeddings')
+                           default='concat', help='Fusion method for combining embeddings (default: %(default)s)')
     hf_parser.add_argument('--skip-training', action='store_true', help='Skip training step')
     hf_parser.add_argument('--skip-testing', action='store_true', help='Skip testing step')
 
     # Training configuration
     training_group = hf_parser.add_argument_group('Training Configuration')
-    training_group.add_argument('--epochs', type=int, default=100, help='Training epochs')
+    training_group.add_argument('--epochs', type=int, default=100, help='Training epochs (default: %(default)s)')
     training_group.add_argument('--model-type', choices=['gcn', 'gat', 'rgcn', 'heterogeneous'],
-                               default='gcn', help='GNN model architecture')
-    training_group.add_argument('--hidden-dim', type=int, default=128, help='Hidden layer dimensions')
-    training_group.add_argument('--out-dim', type=int, default=64, help='Output embedding dimensions')
+                               default='gcn', help='GNN model architecture (default: %(default)s)')
+    training_group.add_argument('--hidden-dim', type=int, default=128, help='Hidden layer dimensions (default: %(default)s)')
+    training_group.add_argument('--out-dim', type=int, default=64, help='Output embedding dimensions (default: %(default)s)')
     training_group.add_argument('--loss-fn', choices=['triplet', 'contrastive', 'cosine', 'cross_entropy'],
-                               default='triplet', help='Loss function')
+                               default='triplet', help='Loss function (default: %(default)s)')
     training_group.add_argument('--use-multi-relation', action='store_true',
                                help='Include all ObjectProperty relations')
     training_group.add_argument('--text-model', help='Text model for semantic features (overrides base-model for training)')
@@ -150,7 +207,7 @@ def setup_hf_parser(subparsers):
     details_group.add_argument('--author-email', help='Model author email')
     details_group.add_argument('--description', help='Custom model description')
     details_group.add_argument('--domain', help='Ontology domain (auto-detected if not specified)')
-    details_group.add_argument('--license', default='apache-2.0', help='Model license')
+    details_group.add_argument('--license', default='apache-2.0', help='Model license (default: %(default)s)')
     details_group.add_argument('--tags', nargs='+', help='Additional custom tags')
 
     # HuggingFace upload options
@@ -159,6 +216,10 @@ def setup_hf_parser(subparsers):
     upload_group.add_argument('--hub-name', help='HuggingFace Hub model name (e.g., username/model-name)')
     upload_group.add_argument('--private', action='store_true', help='Make the uploaded model private')
     upload_group.add_argument('--commit-message', help='Commit message for upload')
+
+    # Global options
+    hf_parser.add_argument('--verbose', '-v', action='store_true', help='Enable verbose output')
+    hf_parser.add_argument('--quiet', '-q', action='store_true', help='Suppress non-essential output')
 
 
 def setup_hf_train_parser(subparsers):
@@ -171,11 +232,11 @@ def setup_hf_train_parser(subparsers):
 
     hf_train_parser.add_argument('ontology', help='Path to OWL ontology file')
     hf_train_parser.add_argument('--output', '-o', required=True, help='Output embeddings file (.parquet)')
-    hf_train_parser.add_argument('--text-model', default='all-MiniLM-L6-v2', help='Base text model')
-    hf_train_parser.add_argument('--epochs', type=int, default=100, help='Training epochs')
-    hf_train_parser.add_argument('--model-type', choices=['gcn', 'gat'], default='gcn', help='GNN architecture')
-    hf_train_parser.add_argument('--hidden-dim', type=int, default=128, help='Hidden dimensions')
-    hf_train_parser.add_argument('--out-dim', type=int, default=64, help='Output dimensions')
+    hf_train_parser.add_argument('--text-model', default='all-MiniLM-L6-v2', help='Base text model (default: %(default)s)')
+    hf_train_parser.add_argument('--epochs', type=int, default=100, help='Training epochs (default: %(default)s)')
+    hf_train_parser.add_argument('--model-type', choices=['gcn', 'gat'], default='gcn', help='GNN architecture (default: %(default)s)')
+    hf_train_parser.add_argument('--hidden-dim', type=int, default=128, help='Hidden dimensions (default: %(default)s)')
+    hf_train_parser.add_argument('--out-dim', type=int, default=64, help='Output dimensions (default: %(default)s)')
 
 
 def setup_hf_create_parser(subparsers):
@@ -188,10 +249,10 @@ def setup_hf_create_parser(subparsers):
 
     hf_create_parser.add_argument('embeddings', help='Path to embeddings file (.parquet)')
     hf_create_parser.add_argument('model_name', help='Name for the HuggingFace model')
-    hf_create_parser.add_argument('--output-dir', default='./hf_models', help='Output directory')
+    hf_create_parser.add_argument('--output-dir', default='./hf_models', help='Output directory (default: %(default)s)')
     hf_create_parser.add_argument('--base-model', help='Base sentence transformer (auto-detected if not specified)')
     hf_create_parser.add_argument('--fusion', choices=['concat', 'attention', 'gated', 'weighted_avg'],
-                                  default='concat', help='Fusion method')
+                                  default='concat', help='Fusion method (default: %(default)s)')
     hf_create_parser.add_argument('--ontology', help='Original ontology file (for model card generation)')
 
     # Model details configuration
@@ -226,22 +287,27 @@ def setup_hf_batch_parser(subparsers):
     hf_batch_parser = subparsers.add_parser(
         'hf-batch',
         help='Batch process multiple ontologies for HuggingFace models',
-        description='Process multiple OWL files to create HuggingFace models in batch'
+        description='Process multiple OWL files to create HuggingFace models in batch',
+        epilog='''examples:
+  on2vec hf-batch owl_files/ ./output
+  on2vec hf-batch owl_files/ ./output --max-workers 4 --base-models all-MiniLM-L6-v2 all-mpnet-base-v2
+  on2vec hf-batch owl_files/ ./output --fusion-methods concat attention --epochs 100 200''',
+        formatter_class=argparse.RawDescriptionHelpFormatter
     )
 
     hf_batch_parser.add_argument('input_dir', help='Directory containing OWL files')
     hf_batch_parser.add_argument('output_dir', help='Output directory for results')
     hf_batch_parser.add_argument('--base-models', nargs='+', default=['all-MiniLM-L6-v2'],
-                                 help='Base models to test')
+                                 help='Base models to test (default: %(default)s)')
     hf_batch_parser.add_argument('--fusion-methods', nargs='+', default=['concat'],
-                                 help='Fusion methods to test')
-    hf_batch_parser.add_argument('--max-workers', type=int, default=2, help='Parallel workers')
+                                 help='Fusion methods to test (default: %(default)s)')
+    hf_batch_parser.add_argument('--max-workers', type=int, default=2, help='Parallel workers (default: %(default)s)')
 
     # Processing options
     hf_batch_parser.add_argument('--force-retrain', action='store_true',
                                  help='Force retraining even if embeddings exist')
     hf_batch_parser.add_argument('--owl-pattern', default='*.owl',
-                                 help='Pattern for finding OWL files')
+                                 help='Pattern for finding OWL files (default: %(default)s)')
     hf_batch_parser.add_argument('--limit', type=int,
                                  help='Limit number of OWL files to process')
 
@@ -277,7 +343,7 @@ def setup_hf_batch_parser(subparsers):
     details_group.add_argument('--author-email', help='Model author email')
     details_group.add_argument('--description', help='Custom model description template (use {ontology_name} placeholder)')
     details_group.add_argument('--domain', help='Ontology domain (auto-detected if not specified)')
-    details_group.add_argument('--license', default='apache-2.0', help='Model license')
+    details_group.add_argument('--license', default='apache-2.0', help='Model license (default: %(default)s)')
     details_group.add_argument('--tags', nargs='+', help='Additional custom tags')
 
     # HuggingFace upload options
@@ -299,7 +365,12 @@ def setup_evaluate_parser(subparsers):
     evaluate_parser = subparsers.add_parser(
         'evaluate',
         help='Comprehensively evaluate ontology embeddings',
-        description='Perform intrinsic and extrinsic evaluation of ontology embeddings'
+        description='Perform intrinsic and extrinsic evaluation of ontology embeddings',
+        epilog='''examples:
+  on2vec evaluate embeddings.parquet
+  on2vec evaluate embeddings.parquet --ontology ontology.owl --output-dir results
+  on2vec evaluate embeddings.parquet --intrinsic --clustering-methods kmeans dbscan''',
+        formatter_class=argparse.RawDescriptionHelpFormatter
     )
 
     evaluate_parser.add_argument('embeddings', help='Path to embeddings parquet file')
@@ -342,7 +413,7 @@ def setup_evaluate_batch_parser(subparsers):
     batch_parser.add_argument('--ontology', nargs='*', help='Paths to corresponding OWL ontology files (optional)')
     batch_parser.add_argument('--ontology-list', help='File containing list of ontology file paths (one per line)')
     batch_parser.add_argument('--output-dir', default='evaluation_batch_results',
-                             help='Directory to save batch evaluation results')
+                             help='Directory to save batch evaluation results (default: %(default)s)')
 
     # Evaluation subset selection (same as single evaluation)
     eval_group = batch_parser.add_argument_group('Evaluation Selection')
@@ -361,11 +432,16 @@ def setup_benchmark_parser(subparsers):
     benchmark_parser = subparsers.add_parser(
         'benchmark',
         help='Run MTEB benchmarks on models',
-        description='Evaluate sentence-transformers models against MTEB benchmark tasks'
+        description='Evaluate sentence-transformers models against MTEB benchmark tasks',
+        epilog='''examples:
+  on2vec benchmark ./hf_models/my-model
+  on2vec benchmark my-model --quick --output-dir ./results
+  on2vec benchmark model-path --task-types STS Classification --batch-size 16''',
+        formatter_class=argparse.RawDescriptionHelpFormatter
     )
 
     benchmark_parser.add_argument('model_path', help='Path to model or model name')
-    benchmark_parser.add_argument('--output-dir', default='./mteb_results', help='Results output directory')
+    benchmark_parser.add_argument('--output-dir', default='./mteb_results', help='Results output directory (default: %(default)s)')
     benchmark_parser.add_argument('--model-name', help='Model name for results')
     benchmark_parser.add_argument('--tasks', nargs='+', help='Specific tasks to run')
     benchmark_parser.add_argument('--task-types', nargs='+', choices=[
@@ -373,7 +449,7 @@ def setup_benchmark_parser(subparsers):
         'Retrieval', 'STS', 'Summarization'
     ], help='Task types to run')
     benchmark_parser.add_argument('--quick', action='store_true', help='Run quick subset of tasks')
-    benchmark_parser.add_argument('--batch-size', type=int, default=32, help='Evaluation batch size')
+    benchmark_parser.add_argument('--batch-size', type=int, default=32, help='Evaluation batch size (default: %(default)s)')
 
 
 def setup_compare_parser(subparsers):
@@ -385,7 +461,7 @@ def setup_compare_parser(subparsers):
     )
 
     compare_parser.add_argument('model_path', help='Path to ontology-augmented model')
-    compare_parser.add_argument('--vanilla-model', default='all-MiniLM-L6-v2', help='Vanilla model for comparison')
+    compare_parser.add_argument('--vanilla-model', default='all-MiniLM-L6-v2', help='Vanilla model for comparison (default: %(default)s)')
     compare_parser.add_argument('--domain-terms', nargs='+', help='Domain-specific terms for testing')
     compare_parser.add_argument('--detailed', action='store_true', help='Show detailed analysis')
 
@@ -419,41 +495,111 @@ def run_train_command(args):
     """Execute the train command."""
     from .workflows import train_model_only
 
+    # Validate inputs
+    if not validate_file_exists(args.ontology, "OWL ontology file"):
+        return 1
+
+    if not validate_directory_exists(Path(args.output).parent, create_if_missing=True):
+        return 1
+
+    # Display configuration
+    config = {
+        'ontology_file': args.ontology,
+        'model_type': args.model_type,
+        'hidden_dim': args.hidden_dim,
+        'out_dim': args.out_dim,
+        'epochs': args.epochs,
+        'loss_function': args.loss_fn,
+        'use_multi_relation': args.use_multi_relation,
+        'use_text_features': args.use_text_features,
+        'text_model': args.text_model if args.use_text_features else 'N/A'
+    }
+    display_configuration(config, "Training Configuration")
+
     try:
-        result = train_model_only(
-            owl_file=args.ontology,
-            model_output=args.output,
-            model_type=args.model_type,
-            hidden_dim=args.hidden_dim,
-            out_dim=args.out_dim,
-            epochs=args.epochs,
-            loss_fn=args.loss_fn,
-            use_multi_relation=args.use_multi_relation,
-            use_text_features=args.use_text_features,
-            text_model_name=args.text_model or 'all-MiniLM-L6-v2'
-        )
-        print(f"✅ Training completed: {result['model_path']}")
+        start_time = time.time()
+
+        def train_operation():
+            return train_model_only(
+                owl_file=args.ontology,
+                model_output=args.output,
+                model_type=args.model_type,
+                hidden_dim=args.hidden_dim,
+                out_dim=args.out_dim,
+                epochs=args.epochs,
+                loss_fn=args.loss_fn,
+                use_multi_relation=args.use_multi_relation,
+                use_text_features=args.use_text_features,
+                text_model_name=args.text_model or 'all-MiniLM-L6-v2'
+            )
+
+        result = with_progress_tracking("Model training", train_operation)
+
+        # Add timing info
+        result['elapsed_time'] = time.time() - start_time
+
+        # Add file size if model exists
+        if Path(args.output).exists():
+            result['file_size'] = Path(args.output).stat().st_size
+
+        print_success_summary("Model Training", {
+            'model_path': result['model_path'],
+            'elapsed_time': result['elapsed_time'],
+            'file_size': result.get('file_size')
+        })
         return 0
     except Exception as e:
-        print(f"❌ Training failed: {e}")
-        return 1
+        return handle_cli_error(e, "Model training", verbose=getattr(args, 'verbose', False))
 
 
 def run_embed_command(args):
     """Execute the embed command."""
     from .workflows import embed_with_trained_model
 
+    # Validate inputs
+    if not validate_file_exists(args.model, "model file"):
+        return 1
+
+    if not validate_file_exists(args.ontology, "OWL ontology file"):
+        return 1
+
+    if not validate_directory_exists(Path(args.output).parent, create_if_missing=True):
+        return 1
+
+    # Display configuration
+    config = {
+        'model_file': args.model,
+        'ontology_file': args.ontology,
+        'output_file': args.output
+    }
+    display_configuration(config, "Embedding Generation Configuration")
+
     try:
-        result = embed_with_trained_model(
-            model_path=args.model,
-            owl_file=args.ontology,
-            output_file=args.output
-        )
-        print(f"✅ Embeddings generated: {result['output_file']} ({result['num_embeddings']:,} embeddings)")
+        start_time = time.time()
+
+        def embed_operation():
+            return embed_with_trained_model(
+                model_path=args.model,
+                owl_file=args.ontology,
+                output_file=args.output
+            )
+
+        result = with_progress_tracking("Embedding generation", embed_operation)
+
+        # Add timing and file size info
+        result['elapsed_time'] = time.time() - start_time
+        if Path(args.output).exists():
+            result['file_size'] = Path(args.output).stat().st_size
+
+        print_success_summary("Embedding Generation", {
+            'output_file': result['output_file'],
+            'num_embeddings': result['num_embeddings'],
+            'elapsed_time': result['elapsed_time'],
+            'file_size': result.get('file_size')
+        })
         return 0
     except Exception as e:
-        print(f"❌ Embedding generation failed: {e}")
-        return 1
+        return handle_cli_error(e, "Embedding generation", verbose=getattr(args, 'verbose', False))
 
 
 def run_visualize_command(args):
@@ -476,6 +622,13 @@ def run_visualize_command(args):
 def run_hf_command(args):
     """Execute the HuggingFace end-to-end command."""
     from .huggingface_workflows import end_to_end_workflow
+
+    # Validate inputs
+    if not validate_file_exists(args.ontology, "OWL ontology file"):
+        return 1
+
+    if not validate_directory_exists(args.output_dir, create_if_missing=True):
+        return 1
 
     # Build training configuration
     training_config = {
@@ -514,23 +667,53 @@ def run_hf_command(args):
         upload_options['private'] = args.private
         upload_options['commit_message'] = args.commit_message
 
+    # Display comprehensive configuration
+    display_config = {
+        **training_config,
+        'ontology_file': args.ontology,
+        'model_name': args.model_name,
+        'output_directory': args.output_dir,
+        'base_model': args.base_model or "all-MiniLM-L6-v2",
+        'fusion_method': args.fusion,
+        'skip_training': args.skip_training,
+        'skip_testing': args.skip_testing,
+        'upload_to_hub': args.upload
+    }
+    display_configuration(display_config, "HuggingFace Workflow Configuration")
+
     try:
-        success = end_to_end_workflow(
-            owl_file=args.ontology,
-            model_name=args.model_name,
-            output_dir=args.output_dir,
-            base_model=args.base_model or "all-MiniLM-L6-v2",
-            fusion_method=args.fusion,
-            skip_training=args.skip_training,
-            skip_testing=args.skip_testing,
-            training_config=training_config,
-            model_details=model_details,
-            upload_options=upload_options
-        )
+        start_time = time.time()
+
+        def hf_workflow():
+            return end_to_end_workflow(
+                owl_file=args.ontology,
+                model_name=args.model_name,
+                output_dir=args.output_dir,
+                base_model=args.base_model or "all-MiniLM-L6-v2",
+                fusion_method=args.fusion,
+                skip_training=args.skip_training,
+                skip_testing=args.skip_testing,
+                training_config=training_config,
+                model_details=model_details,
+                upload_options=upload_options
+            )
+
+        success = with_progress_tracking("HuggingFace model creation", hf_workflow)
+
+        if success:
+            elapsed_time = time.time() - start_time
+            model_path = Path(args.output_dir) / args.model_name
+            file_size = sum(f.stat().st_size for f in model_path.rglob('*') if f.is_file()) if model_path.exists() else None
+
+            print_success_summary("HuggingFace Model Creation", {
+                'model_path': str(model_path),
+                'elapsed_time': elapsed_time,
+                'file_size': file_size
+            })
+
         return 0 if success else 1
     except Exception as e:
-        print(f"❌ HuggingFace workflow failed: {e}")
-        return 1
+        return handle_cli_error(e, "HuggingFace workflow", verbose=getattr(args, 'verbose', False))
 
 
 def run_hf_train_command(args):
@@ -1081,20 +1264,65 @@ def main(args: Optional[List[str]] = None):
     if args is None:
         args = sys.argv[1:]
 
+    # Handle special arguments before parsing
+    if '--save-config' in args:
+        # Parse just to get the save-config argument
+        temp_parser = argparse.ArgumentParser()
+        temp_parser.add_argument('--save-config', metavar='PATH')
+        temp_args, _ = temp_parser.parse_known_args(args)
+        save_sample_config(temp_args.save_config)
+        return 0
+
     # If no command provided, show help
     if not args or args[0] in ['-h', '--help']:
         parser.print_help()
+        print("\n💡 Quick shortcuts: t=train, e=embed, v=viz, eval=evaluate, b=bench, i=inspect")
+        print("📝 Configuration: --config file.yml or --save-config file.yml")
         return 0
 
+    # Handle alias expansion before parsing
+    if len(args) > 0:
+        alias_map = {
+            't': 'train',
+            'e': 'embed',
+            'viz': 'visualize',
+            'v': 'visualize',
+            'eval': 'evaluate',
+            'bench': 'benchmark',
+            'b': 'benchmark',
+            'i': 'inspect'
+        }
+        if args[0] in alias_map:
+            args[0] = alias_map[args[0]]
+
     parsed_args = parser.parse_args(args)
+
+    # Load configuration if specified or find default
+    config = {}
+    config_path = getattr(parsed_args, 'config', None)
+    if not config_path:
+        config_path = find_default_config()
+
+    if config_path:
+        try:
+            config = load_config_file(config_path)
+            print(f"📝 Using configuration from: {config_path}")
+        except Exception as e:
+            print(f"⚠️ Configuration file error: {e}")
+            return 1
+
+    # Merge config with command line arguments
+    if hasattr(parsed_args, 'command') and parsed_args.command:
+        parsed_args = merge_config_with_args(config, parsed_args, parsed_args.command)
 
     # If no subcommand was selected, show help
     if not hasattr(parsed_args, 'command') or parsed_args.command is None:
         parser.print_help()
         return 0
 
-    # Route to appropriate command handler
+    # Route to appropriate command handler with aliases
     command_map = {
+        # Full command names
         'train': run_train_command,
         'embed': run_embed_command,
         'visualize': run_visualize_command,
@@ -1109,6 +1337,15 @@ def main(args: Optional[List[str]] = None):
         'compare': run_compare_command,
         'inspect': run_inspect_command,
         'convert': run_convert_command,
+        # Aliases
+        't': run_train_command,
+        'e': run_embed_command,
+        'viz': run_visualize_command,
+        'v': run_visualize_command,
+        'eval': run_evaluate_command,
+        'bench': run_benchmark_command,
+        'b': run_benchmark_command,
+        'i': run_inspect_command,
     }
 
     if parsed_args.command in command_map:
