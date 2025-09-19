@@ -53,11 +53,16 @@ def create_parser() -> argparse.ArgumentParser:
 
     # Get version info with dependencies
     try:
+        from . import __version__
         import torch
         import sentence_transformers
-        version_info = f'on2vec 0.1.0 (PyTorch {torch.__version__}, sentence-transformers {sentence_transformers.__version__})'
+        version_info = f'on2vec {__version__} (PyTorch {torch.__version__}, sentence-transformers {sentence_transformers.__version__})'
     except ImportError:
-        version_info = 'on2vec 0.1.0'
+        try:
+            from . import __version__
+            version_info = f'on2vec {__version__}'
+        except ImportError:
+            version_info = 'on2vec 0.1.1'
 
     parser.add_argument('--version', action='version', version=version_info)
     parser.add_argument('--config', help='Configuration file path (YAML or JSON)')
@@ -124,6 +129,8 @@ def setup_train_parser(subparsers):
                               help='Include text features from ontology')
     train_parser.add_argument('--text-model', default='all-MiniLM-L6-v2',
                               help='Text model for semantic features (default: %(default)s)')
+    train_parser.add_argument('--device', choices=['auto', 'cpu', 'cuda', 'mps'], default='auto',
+                              help='Device for training (default: %(default)s - auto-detects best available)')
     train_parser.add_argument('--verbose', '-v', action='store_true', help='Enable verbose output')
     train_parser.add_argument('--quiet', '-q', action='store_true', help='Suppress non-essential output')
 
@@ -143,6 +150,8 @@ def setup_embed_parser(subparsers):
     embed_parser.add_argument('model', help='Path to trained model file')
     embed_parser.add_argument('ontology', help='Path to OWL ontology file')
     embed_parser.add_argument('--output', '-o', required=True, help='Output embeddings file (.parquet)')
+    embed_parser.add_argument('--device', choices=['auto', 'cpu', 'cuda', 'mps'], default='auto',
+                              help='Device for embedding generation (default: %(default)s - auto-detects best available)')
     embed_parser.add_argument('--verbose', '-v', action='store_true', help='Enable verbose output')
     embed_parser.add_argument('--quiet', '-q', action='store_true', help='Suppress non-essential output')
 
@@ -218,6 +227,8 @@ def setup_hf_parser(subparsers):
     upload_group.add_argument('--commit-message', help='Commit message for upload')
 
     # Global options
+    hf_parser.add_argument('--device', choices=['auto', 'cpu', 'cuda', 'mps'], default='auto',
+                           help='Device for training and processing (default: %(default)s - auto-detects best available)')
     hf_parser.add_argument('--verbose', '-v', action='store_true', help='Enable verbose output')
     hf_parser.add_argument('--quiet', '-q', action='store_true', help='Suppress non-essential output')
 
@@ -237,6 +248,8 @@ def setup_hf_train_parser(subparsers):
     hf_train_parser.add_argument('--model-type', choices=['gcn', 'gat'], default='gcn', help='GNN architecture (default: %(default)s)')
     hf_train_parser.add_argument('--hidden-dim', type=int, default=128, help='Hidden dimensions (default: %(default)s)')
     hf_train_parser.add_argument('--out-dim', type=int, default=64, help='Output dimensions (default: %(default)s)')
+    hf_train_parser.add_argument('--device', choices=['auto', 'cpu', 'cuda', 'mps'], default='auto',
+                                 help='Device for training (default: %(default)s - auto-detects best available)')
 
 
 def setup_hf_create_parser(subparsers):
@@ -530,7 +543,8 @@ def run_train_command(args):
                 loss_fn=args.loss_fn,
                 use_multi_relation=args.use_multi_relation,
                 use_text_features=args.use_text_features,
-                text_model_name=args.text_model or 'all-MiniLM-L6-v2'
+                text_model_name=args.text_model or 'all-MiniLM-L6-v2',
+                device=args.device
             )
 
         result = with_progress_tracking("Model training", train_operation)
@@ -581,7 +595,8 @@ def run_embed_command(args):
             return embed_with_trained_model(
                 model_path=args.model,
                 owl_file=args.ontology,
-                output_file=args.output
+                output_file=args.output,
+                device=args.device
             )
 
         result = with_progress_tracking("Embedding generation", embed_operation)
@@ -604,19 +619,36 @@ def run_embed_command(args):
 
 def run_visualize_command(args):
     """Execute the visualize command."""
-    # For now, still use the script since it's not moved to module yet
-    from viz import main as viz_main
+    import subprocess
+    import os
 
-    # Convert args to format expected by viz.py
-    sys.argv = ['viz.py', args.embeddings]
-    if args.output:
-        sys.argv.extend(['--output', args.output])
-    if args.neighbors:
-        sys.argv.extend(['--neighbors', str(args.neighbors)])
-    if args.min_dist:
-        sys.argv.extend(['--min_dist', str(args.min_dist)])
+    # Use the comprehensive visualization script
+    script_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'scripts')
+    viz_script = os.path.join(script_dir, 'visualize_embeddings.py')
 
-    return viz_main()
+    if not os.path.exists(viz_script):
+        print(f"❌ Visualization script not found: {viz_script}")
+        return 1
+
+    # Build command arguments
+    cmd = ['python', viz_script, args.embeddings]
+
+    if hasattr(args, 'output') and args.output:
+        cmd.extend(['--output-dir', args.output])
+    if hasattr(args, 'neighbors') and args.neighbors:
+        cmd.extend(['--umap-neighbors', str(args.neighbors)])
+    if hasattr(args, 'min_dist') and args.min_dist:
+        cmd.extend(['--umap-min-dist', str(args.min_dist)])
+
+    try:
+        result = subprocess.run(cmd, check=True)
+        return result.returncode
+    except subprocess.CalledProcessError as e:
+        print(f"❌ Visualization failed: {e}")
+        return e.returncode
+    except Exception as e:
+        print(f"❌ Error running visualization: {e}")
+        return 1
 
 
 def run_hf_command(args):
@@ -638,6 +670,7 @@ def run_hf_command(args):
         'out_dim': args.out_dim,
         'loss_fn': args.loss_fn,
         'use_multi_relation': args.use_multi_relation,
+        'device': args.device,
     }
 
     # Use text-model if specified, otherwise use base-model
@@ -728,7 +761,8 @@ def run_hf_train_command(args):
             epochs=args.epochs,
             model_type=args.model_type,
             hidden_dim=args.hidden_dim,
-            out_dim=args.out_dim
+            out_dim=args.out_dim,
+            device=args.device
         )
         return 0 if success else 1
     except Exception as e:
