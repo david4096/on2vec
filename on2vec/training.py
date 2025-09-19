@@ -8,11 +8,12 @@ import time
 import logging
 from .models import OntologyGNN, MultiRelationOntologyGNN, HeterogeneousOntologyGNN, TextAugmentedOntologyGNN
 from .loss_functions import get_loss_function
+from .device_utils import get_device, move_to_device, get_memory_usage, optimize_for_device, log_device_performance_tips
 
 logger = logging.getLogger(__name__)
 
 
-def train_model(model, x, edge_index, optimizer, loss_fn, epochs=100, edge_type=None, text_x=None):
+def train_model(model, x, edge_index, optimizer, loss_fn, epochs=100, edge_type=None, text_x=None, device=None):
     """
     Train a GNN model on ontology data.
 
@@ -25,12 +26,44 @@ def train_model(model, x, edge_index, optimizer, loss_fn, epochs=100, edge_type=
         epochs (int): Number of training epochs
         edge_type (torch.Tensor, optional): Edge types for multi-relation models
         text_x (torch.Tensor, optional): Text features for TextAugmentedOntologyGNN
+        device (str or torch.device, optional): Device to use for training
 
     Returns:
         torch.nn.Module: Trained model
     """
+    # Get device (use model's device if available, otherwise auto-detect)
+    if device is None:
+        if hasattr(model, 'device'):
+            training_device = model.device
+        else:
+            training_device = get_device('auto', verbose=True)
+            model = model.to(training_device)
+    else:
+        training_device = get_device(device, verbose=True)
+        model = model.to(training_device)
+
+    # Move data to device
+    x = move_to_device(x, training_device)
+    edge_index = move_to_device(edge_index, training_device)
+    if edge_type is not None:
+        edge_type = move_to_device(edge_type, training_device)
+    if text_x is not None:
+        text_x = move_to_device(text_x, training_device)
+
+    # Log device and performance tips
+    logger.info(f"Training on device: {training_device}")
+    log_device_performance_tips(training_device)
+
+    # Get device-specific optimization settings
+    device_settings = optimize_for_device(training_device)
+
     model.train()
     start_time = time.time()
+
+    # Report memory usage if on GPU
+    if training_device.type in ['cuda']:
+        used_mem, total_mem = get_memory_usage(training_device)
+        logger.info(f"GPU Memory: {used_mem:.1f}/{total_mem:.1f} GB")
 
     for epoch in range(epochs):
         logger.info(f"Epoch {epoch}/{epochs} starting...")
@@ -297,7 +330,7 @@ def create_training_setup(model_type='gcn', hidden_dim=128, out_dim=64, learning
 
 def train_ontology_embeddings(owl_file, model_output, model_type='gcn', hidden_dim=128, out_dim=64,
                             epochs=100, loss_fn_name='triplet', learning_rate=0.01, use_multi_relation=False,
-                            dropout=0.0, num_bases=None):
+                            dropout=0.0, num_bases=None, device=None):
     """
     Complete training pipeline from OWL file to saved model.
 
@@ -313,6 +346,7 @@ def train_ontology_embeddings(owl_file, model_output, model_type='gcn', hidden_d
         use_multi_relation (bool): Use multi-relation graph building
         dropout (float): Dropout rate for multi-relation models
         num_bases (int, optional): Number of bases for RGCN decomposition
+        device (str or torch.device, optional): Device to use for training
 
     Returns:
         dict: Training results with model path and metadata
@@ -356,7 +390,8 @@ def train_ontology_embeddings(owl_file, model_output, model_type='gcn', hidden_d
             num_relations=num_relations,
             model_type=model_type,
             num_bases=num_bases,
-            dropout=dropout
+            dropout=dropout,
+            device=device
         )
     elif model_type == 'heterogeneous':
         if not use_multi_relation:
@@ -367,17 +402,18 @@ def train_ontology_embeddings(owl_file, model_output, model_type='gcn', hidden_d
             hidden_dim=hidden_dim,
             out_dim=out_dim,
             relation_types=graph_data['relation_names'],
-            dropout=dropout
+            dropout=dropout,
+            device=device
         )
     else:
         # Standard GNN models
-        model = OntologyGNN(input_dim, hidden_dim, out_dim, model_type=model_type)
+        model = OntologyGNN(input_dim, hidden_dim, out_dim, model_type=model_type, device=device)
 
     optimizer = Adam(model.parameters(), lr=learning_rate)
     loss_fn = get_loss_function(loss_fn_name)
 
     # Train the model
-    trained_model = train_model(model, x, edge_index, optimizer, loss_fn, epochs=epochs, edge_type=edge_type)
+    trained_model = train_model(model, x, edge_index, optimizer, loss_fn, epochs=epochs, edge_type=edge_type, device=device)
 
     # Save the model
     save_model_checkpoint(trained_model, class_to_index, model_output, relation_data=relation_data)
@@ -405,7 +441,7 @@ def train_text_augmented_ontology_embeddings(owl_file, model_output,
                                            backbone_model='gcn', fusion_method='concat',
                                            hidden_dim=128, out_dim=64,
                                            epochs=100, loss_fn_name='triplet',
-                                           learning_rate=0.01, dropout=0.0):
+                                           learning_rate=0.01, dropout=0.0, device=None):
     """
     Complete training pipeline for text-augmented ontology embeddings.
     Combines structural and semantic text features.
@@ -423,6 +459,7 @@ def train_text_augmented_ontology_embeddings(owl_file, model_output,
         loss_fn_name (str): Name of loss function
         learning_rate (float): Learning rate
         dropout (float): Dropout rate
+        device (str or torch.device, optional): Device to use for training
 
     Returns:
         dict: Training results with model path and metadata
@@ -492,7 +529,8 @@ def train_text_augmented_ontology_embeddings(owl_file, model_output,
         'out_dim': out_dim,
         'model_type': backbone_model,
         'fusion_method': fusion_method,
-        'dropout': dropout
+        'dropout': dropout,
+        'device': device
     }
 
     # Add multi-relation parameters if needed
@@ -516,7 +554,8 @@ def train_text_augmented_ontology_embeddings(owl_file, model_output,
         model, x_structural, edge_index, optimizer, loss_fn,
         epochs=epochs,
         edge_type=relation_data['edge_types'] if relation_data else None,
-        text_x=x_text
+        text_x=x_text,
+        device=device
     )
 
     # Save the model with text-specific metadata

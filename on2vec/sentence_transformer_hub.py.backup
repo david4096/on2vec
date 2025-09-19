@@ -12,14 +12,12 @@ import torch
 import torch.nn as nn
 from sentence_transformers import SentenceTransformer
 from sentence_transformers.models import Transformer, Pooling
-from typing import Dict, List, Optional, Union, Tuple, Any, Set
+from typing import Dict, List, Optional, Union, Tuple, Any
 import numpy as np
 import polars as pl
 import json
 import logging
 from pathlib import Path
-import re
-from collections import Counter
 
 logger = logging.getLogger(__name__)
 
@@ -38,11 +36,7 @@ class OntologyFusionModule(nn.Module):
         fusion_method: str = 'concat',
         top_k_matches: int = 3,
         structural_weight: float = 0.3,
-        input_dim: int = 384,  # Expected input dimension from previous layer
-        # New improved parameters
-        use_keyword_matching: bool = True,
-        relevance_threshold: float = 0.3,
-        preserve_dimensions: bool = False
+        input_dim: int = 384  # Expected input dimension from previous layer
     ):
         super().__init__()
 
@@ -51,21 +45,12 @@ class OntologyFusionModule(nn.Module):
         self.structural_weight = structural_weight
         self.input_dim = input_dim
 
-        # New improved parameters
-        self.use_keyword_matching = use_keyword_matching
-        self.relevance_threshold = relevance_threshold
-        self.preserve_dimensions = preserve_dimensions
-
         # Initialize attributes
         self.node_ids = []
         self.text_embeddings = None
         self.structural_embeddings = None
         self.concept_descriptions = []
         self.structural_dim = None
-
-        # New keyword matching attributes
-        self.concept_keywords = []  # Keywords extracted from concept names
-        self.keyword_to_concepts = {}  # Mapping from keywords to concept indices
 
         # Load ontology data
         if ontology_embeddings_file:
@@ -97,15 +82,9 @@ class OntologyFusionModule(nn.Module):
             self._iri_to_description(iri) for iri in self.node_ids
         ]
 
-        # Build keyword index for improved matching
-        if self.use_keyword_matching:
-            self._build_keyword_index()
-
         logger.info(f"Loaded {len(self.node_ids)} concepts for HF integration")
         logger.info(f"Text embeddings: {self.text_embeddings.shape}")
         logger.info(f"Structural embeddings: {self.structural_embeddings.shape}")
-        if self.use_keyword_matching:
-            logger.info(f"Built keyword index with {len(self.keyword_to_concepts)} unique keywords")
 
     def _iri_to_description(self, iri: str) -> str:
         """Convert IRI to readable description."""
@@ -123,77 +102,6 @@ class OntologyFusionModule(nn.Module):
         name = re.sub(r'([a-z])([A-Z])', r'\1 \2', name)
         return name.lower()
 
-    def _build_keyword_index(self):
-        """Build keyword index for improved concept matching."""
-        self.keyword_to_concepts = {}
-
-        for idx, iri in enumerate(self.node_ids):
-            # Extract meaningful keywords from IRI
-            keywords = self._extract_keywords_from_iri(iri)
-            self.concept_keywords.append(keywords)
-
-            # Index keywords to concepts
-            for keyword in keywords:
-                if keyword not in self.keyword_to_concepts:
-                    self.keyword_to_concepts[keyword] = []
-                self.keyword_to_concepts[keyword].append(idx)
-
-    def _extract_keywords_from_iri(self, iri: str) -> Set[str]:
-        """Extract meaningful keywords from ontology IRI."""
-        # Extract meaningful part
-        if '#' in iri:
-            name = iri.split('#')[-1]
-        elif '/' in iri:
-            name = iri.split('/')[-1]
-        else:
-            name = iri
-
-        # Clean and split into keywords
-        name = re.sub(r'[_\-]', ' ', name)
-        name = re.sub(r'([a-z])([A-Z])', r'\1 \2', name)  # Split camelCase
-
-        # Extract meaningful terms (length > 2, not just numbers)
-        keywords = set()
-        for term in name.split():
-            term = term.lower().strip()
-            if len(term) > 2 and not term.isdigit() and term.isalpha():
-                keywords.add(term)
-
-                # Add common biomedical variants
-                if term.endswith('ase'):  # enzymes
-                    keywords.add(term[:-3])
-                elif term.endswith('tion'):  # processes
-                    keywords.add(term[:-4])
-
-        return keywords
-
-    def _extract_keywords_from_text(self, text: str) -> Set[str]:
-        """Extract meaningful keywords from input text."""
-        # Simple but effective keyword extraction
-        text = text.lower()
-
-        # Split into words and filter
-        words = re.findall(r'\b[a-z]{3,}\b', text)  # Only alphabetic words of length 3+
-
-        # Remove common stop words (simple list for biomedical domain)
-        stop_words = {
-            'the', 'and', 'for', 'are', 'but', 'not', 'you', 'all', 'can', 'had',
-            'was', 'one', 'our', 'out', 'day', 'get', 'has', 'him', 'his', 'how',
-            'may', 'new', 'now', 'old', 'see', 'two', 'way', 'who', 'boy', 'did',
-            'its', 'let', 'put', 'say', 'she', 'too', 'use'
-        }
-
-        meaningful_words = set()
-        for word in words:
-            if word not in stop_words and len(word) > 2:
-                meaningful_words.add(word)
-
-                # Add biomedical variants
-                if word.endswith('s') and len(word) > 3:  # Remove plural
-                    meaningful_words.add(word[:-1])
-
-        return meaningful_words
-
     def _init_fusion_layers(self):
         """Initialize fusion layers based on method."""
         if self.structural_dim is None:
@@ -202,12 +110,7 @@ class OntologyFusionModule(nn.Module):
             return
 
         if self.fusion_method == 'concat':
-            if self.preserve_dimensions:
-                # Project structural to text dimension and concatenate
-                self.struct_proj = nn.Linear(self.structural_dim, self.input_dim)
-                self.output_dim = self.input_dim * 2  # Still doubled, but more manageable
-            else:
-                self.output_dim = self.input_dim + self.structural_dim
+            self.output_dim = self.input_dim + self.structural_dim
         elif self.fusion_method == 'weighted_avg':
             # Project to common dimension
             common_dim = min(self.input_dim, self.structural_dim)
@@ -231,42 +134,6 @@ class OntologyFusionModule(nn.Module):
             self.text_proj = nn.Linear(self.input_dim, common_dim)
             self.struct_proj = nn.Linear(self.structural_dim, common_dim)
             self.output_dim = common_dim
-        # New improved fusion methods
-        elif self.fusion_method == 'adaptive_weighted':
-            # Learnable relevance threshold and weights
-            self.relevance_gate = nn.Sequential(
-                nn.Linear(self.input_dim + self.structural_dim, 128),
-                nn.ReLU(),
-                nn.Linear(128, 1),
-                nn.Sigmoid()
-            )
-
-            if self.preserve_dimensions:
-                # Project structural to text dimension
-                self.struct_proj = nn.Linear(self.structural_dim, self.input_dim)
-                self.fusion_weights = nn.Parameter(torch.tensor([0.8, 0.2]))  # Learnable weights
-                self.output_dim = self.input_dim
-            else:
-                self.output_dim = self.input_dim + self.structural_dim
-
-        elif self.fusion_method == 'residual':
-            # Residual connection approach
-            self.struct_proj = nn.Linear(self.structural_dim, self.input_dim)
-            self.gate = nn.Sequential(
-                nn.Linear(self.input_dim, 1),
-                nn.Sigmoid()
-            )
-            self.output_dim = self.input_dim
-
-        elif self.fusion_method == 'cross_attention':
-            # Cross-attention between text and structure
-            hidden_dim = self.input_dim
-            self.cross_attn = nn.MultiheadAttention(
-                hidden_dim, num_heads=4, batch_first=True
-            )
-            self.struct_proj = nn.Linear(self.structural_dim, hidden_dim)
-            self.layer_norm = nn.LayerNorm(hidden_dim)
-            self.output_dim = hidden_dim
         else:
             raise ValueError(f"Unknown fusion method: {self.fusion_method}")
 
@@ -363,7 +230,7 @@ class OntologyFusionModule(nn.Module):
         return module
 
     def find_similar_concepts(self, text_embedding: torch.Tensor) -> List[Tuple[int, float]]:
-        """Find ontology concepts similar to the given text embedding (legacy method)."""
+        """Find ontology concepts similar to the given text embedding."""
         # Convert to numpy for similarity computation
         if isinstance(text_embedding, torch.Tensor):
             text_embedding = text_embedding.detach().cpu().numpy()
@@ -375,39 +242,6 @@ class OntologyFusionModule(nn.Module):
         # Get top-k matches
         top_indices = np.argsort(similarities)[-self.top_k_matches:][::-1]
         return [(idx, similarities[idx]) for idx in top_indices]
-
-    def find_relevant_concepts_by_keywords(self, text: str) -> List[Tuple[int, float]]:
-        """Find concepts using keyword matching instead of text similarity (improved method)."""
-        if not self.use_keyword_matching or not hasattr(self, 'keyword_to_concepts'):
-            # Fallback to original method
-            return []
-
-        # Extract keywords from input text
-        text_keywords = self._extract_keywords_from_text(text)
-
-        if not text_keywords:
-            return []
-
-        # Find matching concepts
-        concept_scores = Counter()
-
-        for keyword in text_keywords:
-            if keyword in self.keyword_to_concepts:
-                for concept_idx in self.keyword_to_concepts[keyword]:
-                    # Score based on keyword overlap
-                    concept_keywords = self.concept_keywords[concept_idx]
-                    overlap = len(text_keywords.intersection(concept_keywords))
-                    concept_scores[concept_idx] += overlap / len(concept_keywords) if concept_keywords else 0
-
-        # Filter by relevance threshold and limit results
-        relevant_concepts = [
-            (idx, score) for idx, score in concept_scores.items()
-            if score >= self.relevance_threshold
-        ]
-
-        # Sort by relevance and take top concepts
-        relevant_concepts.sort(key=lambda x: x[1], reverse=True)
-        return relevant_concepts[:self.top_k_matches]
 
     def forward(self, features: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         """
@@ -433,19 +267,8 @@ class OntologyFusionModule(nn.Module):
         for i in range(batch_size):
             text_embed = text_embeddings[i]  # [input_dim]
 
-            # Use improved concept matching if available
-            if self.use_keyword_matching:
-                # We need access to original text for keyword matching
-                # This is a limitation - in practice, you'd need to store the input text
-                # For now, fall back to similarity-based matching with relevance filtering
-                similar_concepts = self.find_similar_concepts(text_embed)
-
-                # Apply relevance threshold filtering to similarity-based results
-                similar_concepts = [(idx, score) for idx, score in similar_concepts
-                                  if score >= self.relevance_threshold]
-            else:
-                # Use original similarity-based matching
-                similar_concepts = self.find_similar_concepts(text_embed)
+            # Find similar ontology concepts
+            similar_concepts = self.find_similar_concepts(text_embed)
 
             if similar_concepts:
                 indices, scores = zip(*similar_concepts)
@@ -486,11 +309,7 @@ class OntologyFusionModule(nn.Module):
     def _fuse_embeddings(self, text_embeds: torch.Tensor, struct_embeds: torch.Tensor) -> torch.Tensor:
         """Fuse text and structural embeddings."""
         if self.fusion_method == 'concat':
-            if self.preserve_dimensions and hasattr(self, 'struct_proj'):
-                struct_proj = self.struct_proj(struct_embeds)
-                return torch.cat([text_embeds, struct_proj], dim=1)
-            else:
-                return torch.cat([text_embeds, struct_embeds], dim=1)
+            return torch.cat([text_embeds, struct_embeds], dim=1)
 
         elif self.fusion_method == 'weighted_avg':
             text_proj = self.text_proj(text_embeds)
@@ -522,43 +341,6 @@ class OntologyFusionModule(nn.Module):
             # Gated combination
             return gate_weights * text_proj + (1 - gate_weights) * struct_proj
 
-        # New improved fusion methods
-        elif self.fusion_method == 'adaptive_weighted':
-            if self.preserve_dimensions:
-                # Project structural to text dimension
-                struct_proj = self.struct_proj(struct_embeds)
-
-                # Learn relevance gate
-                combined = torch.cat([text_embeds, struct_embeds], dim=1)
-                relevance = self.relevance_gate(combined)  # [batch, 1]
-
-                # Adaptive weighting based on relevance
-                weights = torch.softmax(self.fusion_weights, dim=0)
-                base_weight = weights[0] + relevance.squeeze() * (weights[1] - weights[0])
-                struct_weight = 1 - base_weight
-
-                return base_weight.unsqueeze(1) * text_embeds + struct_weight.unsqueeze(1) * struct_proj
-            else:
-                return torch.cat([text_embeds, struct_embeds], dim=1)
-
-        elif self.fusion_method == 'residual':
-            # Residual connection with learned gate
-            struct_proj = self.struct_proj(struct_embeds)
-            gate = self.gate(text_embeds)
-            return text_embeds + gate * struct_proj
-
-        elif self.fusion_method == 'cross_attention':
-            # Cross-attention fusion
-            struct_proj = self.struct_proj(struct_embeds).unsqueeze(1)  # [batch, 1, dim]
-            text_query = text_embeds.unsqueeze(1)  # [batch, 1, dim]
-
-            # Cross-attention: text attends to structure
-            attended, _ = self.cross_attn(text_query, struct_proj, struct_proj)
-            attended = attended.squeeze(1)  # [batch, dim]
-
-            # Residual connection with layer norm
-            return self.layer_norm(text_embeds + attended)
-
         else:
             raise ValueError(f"Unknown fusion method: {self.fusion_method}")
 
@@ -569,11 +351,7 @@ def create_hf_sentence_transformer(
     fusion_method: str = 'concat',
     top_k_matches: int = 3,
     structural_weight: float = 0.3,
-    model_name: str = "ontology-augmented-model",
-    # New improved parameters
-    use_keyword_matching: bool = True,
-    relevance_threshold: float = 0.3,
-    preserve_dimensions: bool = False
+    model_name: str = "ontology-augmented-model"
 ) -> SentenceTransformer:
     """
     Create a HuggingFace Hub compatible SentenceTransformer with ontology integration.
@@ -581,14 +359,10 @@ def create_hf_sentence_transformer(
     Args:
         ontology_embeddings_file: Path to on2vec generated parquet file
         base_model: Base transformer model name
-        fusion_method: How to combine embeddings ('concat', 'weighted_avg', 'attention', 'gated',
-                      'adaptive_weighted', 'residual', 'cross_attention')
+        fusion_method: How to combine embeddings ('concat', 'weighted_avg', 'attention', 'gated')
         top_k_matches: Number of ontology concepts to match
         structural_weight: Weight for structural embeddings
         model_name: Name for the model
-        use_keyword_matching: Use improved keyword-based concept matching
-        relevance_threshold: Minimum relevance score for concept matching
-        preserve_dimensions: Keep output dimensions same as input
 
     Returns:
         SentenceTransformer model ready for Hub upload
@@ -615,10 +389,7 @@ def create_hf_sentence_transformer(
         fusion_method=fusion_method,
         top_k_matches=top_k_matches,
         structural_weight=structural_weight,
-        input_dim=transformer.get_word_embedding_dimension(),
-        use_keyword_matching=use_keyword_matching,
-        relevance_threshold=relevance_threshold,
-        preserve_dimensions=preserve_dimensions
+        input_dim=transformer.get_word_embedding_dimension()
     )
 
     # Create the full pipeline
@@ -668,11 +439,7 @@ def create_and_save_hf_model(
     model_name: str,
     output_dir: str,
     base_model: str = 'all-MiniLM-L6-v2',
-    fusion_method: str = 'concat',
-    # New improved parameters
-    use_keyword_matching: bool = True,
-    relevance_threshold: float = 0.3,
-    preserve_dimensions: bool = False
+    fusion_method: str = 'concat'
 ) -> str:
     """
     Create and save a HuggingFace compatible model.
@@ -691,10 +458,7 @@ def create_and_save_hf_model(
         ontology_embeddings_file=ontology_embeddings_file,
         base_model=base_model,
         fusion_method=fusion_method,
-        model_name=model_name,
-        use_keyword_matching=use_keyword_matching,
-        relevance_threshold=relevance_threshold,
-        preserve_dimensions=preserve_dimensions
+        model_name=model_name
     )
 
     # Save model
@@ -782,7 +546,7 @@ If you use this model, please cite:
 @software{{on2vec_sentence_transformers,
   title={{Ontology-Augmented Sentence Transformers}},
   author={{on2vec}},
-  year={{2025}},
+  year={{2024}},
   url={{https://github.com/your-repo/on2vec}}
 }}
 ```

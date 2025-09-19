@@ -18,10 +18,8 @@ from typing import List, Dict, Any, Optional, Iterator
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import time
 
-# Add the project root to the path
-sys.path.insert(0, str(Path(__file__).parent))
-
-from create_hf_model import train_ontology_with_text, create_hf_model, test_model
+# Import from on2vec module
+from .huggingface_workflows import train_ontology_with_text, create_hf_model, validate_hf_model as test_model
 import subprocess
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -46,20 +44,43 @@ def find_owl_files(directory: str, pattern: str = "*.owl") -> List[Path]:
 def generate_model_configs(
     base_models: List[str],
     fusion_methods: List[str],
-    epochs_list: List[int]
+    epochs_list: List[int],
+    training_config: Optional[Dict[str, Any]] = None
 ) -> List[Dict[str, Any]]:
     """Generate all combinations of model configurations."""
     configs = []
+
+    # Extract training parameters with defaults
+    model_types = training_config.get('model_types', ['gcn']) if training_config else ['gcn']
+    hidden_dims = training_config.get('hidden_dims', [128]) if training_config else [128]
+    out_dims = training_config.get('out_dims', [64]) if training_config else [64]
+    loss_fns = training_config.get('loss_fns', ['triplet']) if training_config else ['triplet']
+    use_multi_relation = training_config.get('use_multi_relation', False) if training_config else False
+    text_model = training_config.get('text_model') if training_config else None
+
     for base_model in base_models:
         for fusion in fusion_methods:
             for epochs in epochs_list:
-                config = {
-                    'base_model': base_model,
-                    'fusion_method': fusion,
-                    'epochs': epochs,
-                    'config_id': f"{base_model.split('/')[-1]}_{fusion}_e{epochs}"
-                }
-                configs.append(config)
+                for model_type in model_types:
+                    for hidden_dim in hidden_dims:
+                        for out_dim in out_dims:
+                            for loss_fn in loss_fns:
+                                # Use text_model if specified, otherwise use base_model
+                                actual_text_model = text_model or base_model
+
+                                config = {
+                                    'base_model': base_model,
+                                    'fusion_method': fusion,
+                                    'epochs': epochs,
+                                    'model_type': model_type,
+                                    'hidden_dim': hidden_dim,
+                                    'out_dim': out_dim,
+                                    'loss_fn': loss_fn,
+                                    'use_multi_relation': use_multi_relation,
+                                    'text_model': actual_text_model,
+                                    'config_id': f"{base_model.split('/')[-1]}_{fusion}_{model_type}_h{hidden_dim}_o{out_dim}_{loss_fn}_e{epochs}"
+                                }
+                                configs.append(config)
     return configs
 
 
@@ -67,7 +88,9 @@ def process_single_ontology(
     owl_file: Path,
     config: Dict[str, Any],
     output_base_dir: Path,
-    force_retrain: bool = False
+    force_retrain: bool = False,
+    model_details: Optional[Dict[str, Any]] = None,
+    upload_options: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
     """Process a single ontology with given configuration."""
     ontology_name = owl_file.stem
@@ -102,8 +125,13 @@ def process_single_ontology(
             if not train_ontology_with_text(
                 owl_file=str(owl_file),
                 output_file=str(embeddings_file),
-                text_model=config['base_model'],
-                epochs=config['epochs']
+                text_model=config['text_model'],
+                epochs=config['epochs'],
+                model_type=config['model_type'],
+                hidden_dim=config['hidden_dim'],
+                out_dim=config['out_dim'],
+                loss_fn=config['loss_fn'],
+                use_multi_relation=config['use_multi_relation']
             ):
                 raise Exception("Training failed")
         else:
@@ -111,12 +139,30 @@ def process_single_ontology(
 
         # Step 2: Create HF model
         logger.info(f"Creating HF model for {ontology_name}")
+
+        # Process upload options template if present
+        processed_upload_options = None
+        if upload_options:
+            processed_upload_options = upload_options.copy()
+            if 'hub_name_template' in upload_options:
+                # Replace template placeholders with actual values
+                hub_name = upload_options['hub_name_template'].format(
+                    ontology_name=ontology_name,
+                    config_id=config_id
+                )
+                processed_upload_options['hub_name'] = hub_name
+                # Remove the template key since we now have the actual hub_name
+                processed_upload_options.pop('hub_name_template', None)
+
         actual_model_dir = create_hf_model(
             embeddings_file=str(embeddings_file),
             model_name=f"{ontology_name}_{config_id}",
             output_dir=str(ontology_dir),
             base_model=config['base_model'],
-            fusion_method=config['fusion_method']
+            fusion_method=config['fusion_method'],
+            ontology_file=str(owl_file),
+            model_details=model_details,
+            upload_options=processed_upload_options
         )
 
         # Step 3: Test model
@@ -151,7 +197,10 @@ def batch_process_ontologies(
     max_workers: int = 2,
     force_retrain: bool = False,
     owl_pattern: str = "*.owl",
-    limit: Optional[int] = None
+    limit: Optional[int] = None,
+    training_config: Optional[Dict[str, Any]] = None,
+    model_details: Optional[Dict[str, Any]] = None,
+    upload_options: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
     """Process multiple ontologies with multiple configurations."""
     logger.info(f"Starting batch processing")
@@ -169,7 +218,7 @@ def batch_process_ontologies(
         logger.info(f"Limited to first {limit} files")
 
     # Generate configurations
-    configs = generate_model_configs(base_models, fusion_methods, epochs_list)
+    configs = generate_model_configs(base_models, fusion_methods, epochs_list, training_config)
     logger.info(f"Generated {len(configs)} configurations")
 
     # Create output directory
@@ -192,7 +241,7 @@ def batch_process_ontologies(
     if max_workers == 1:
         # Sequential processing
         for owl_file, config in tasks:
-            result = process_single_ontology(owl_file, config, output_base_dir, force_retrain)
+            result = process_single_ontology(owl_file, config, output_base_dir, force_retrain, model_details, upload_options)
             results.append(result)
             completed += 1
             logger.info(f"Progress: {completed}/{total_tasks} ({100*completed/total_tasks:.1f}%)")
@@ -200,7 +249,7 @@ def batch_process_ontologies(
         # Parallel processing
         with ProcessPoolExecutor(max_workers=max_workers) as executor:
             future_to_task = {
-                executor.submit(process_single_ontology, owl_file, config, output_base_dir, force_retrain): (owl_file, config)
+                executor.submit(process_single_ontology, owl_file, config, output_base_dir, force_retrain, model_details, upload_options): (owl_file, config)
                 for owl_file, config in tasks
             }
 

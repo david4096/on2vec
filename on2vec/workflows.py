@@ -36,7 +36,9 @@ def train_and_embed_workflow(
     use_text_features: bool = False,
     text_model_type: str = 'sentence_transformer',
     text_model_name: str = 'all-MiniLM-L6-v2',
-    fusion_method: str = 'concat'
+    fusion_method: str = 'concat',
+    # Device parameters
+    device: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Complete workflow for training GNN models and generating embeddings.
@@ -72,7 +74,8 @@ def train_and_embed_workflow(
                 epochs=epochs,
                 loss_fn_name=loss_fn,
                 learning_rate=learning_rate,
-                dropout=dropout
+                dropout=dropout,
+                device=device
             )
             logger.info(f"Text-augmented training completed. Model saved to {training_result['model_path']}")
             logger.info(f"Structural features: {training_result['structural_dim']}, Text features: {training_result['text_dim']}")
@@ -90,7 +93,8 @@ def train_and_embed_workflow(
                 learning_rate=learning_rate,
                 use_multi_relation=use_multi_relation,
                 dropout=dropout,
-                num_bases=num_bases
+                num_bases=num_bases,
+                device=device
             )
             logger.info(f"Training completed. Model saved to {training_result['model_path']}")
             if training_result.get('num_relations', 0) > 0:
@@ -101,7 +105,8 @@ def train_and_embed_workflow(
     embedding_result = embed_same_ontology(
         model_path=model_output,
         owl_file=owl_file,
-        output_file=output
+        output_file=output,
+        device=device
     )
 
     logger.info(f"Embeddings generated and saved to {output}")
@@ -119,7 +124,8 @@ def train_and_embed_workflow(
 def embed_with_trained_model(
     model_path: str,
     owl_file: str,
-    output_file: str = 'embeddings.parquet'
+    output_file: str = 'embeddings.parquet',
+    device: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Generate embeddings using a pre-trained model.
@@ -134,7 +140,8 @@ def embed_with_trained_model(
     embedding_result = embed_ontology_with_model(
         model_path=model_path,
         owl_file=owl_file,
-        output_file=output_file
+        output_file=output_file,
+        device=device
     )
 
     logger.info(f"Embeddings generated successfully")
@@ -164,7 +171,9 @@ def train_model_only(
     use_text_features: bool = False,
     text_model_type: str = 'sentence_transformer',
     text_model_name: str = 'all-MiniLM-L6-v2',
-    fusion_method: str = 'concat'
+    fusion_method: str = 'concat',
+    # Device parameters
+    device: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Train a model without generating embeddings.
@@ -196,7 +205,8 @@ def train_model_only(
             epochs=epochs,
             loss_fn_name=loss_fn,
             learning_rate=learning_rate,
-            dropout=dropout
+            dropout=dropout,
+            device=device
         )
         logger.info(f"Text-augmented training completed")
         logger.info(f"Structural features: {training_result['structural_dim']}, Text features: {training_result['text_dim']}")
@@ -213,7 +223,8 @@ def train_model_only(
             learning_rate=learning_rate,
             use_multi_relation=use_multi_relation,
             dropout=dropout,
-            num_bases=num_bases
+            num_bases=num_bases,
+            device=device
         )
         logger.info(f"Training completed")
         if training_result.get('num_relations', 0) > 0:
