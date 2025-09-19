@@ -283,6 +283,15 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 Contributions are welcome! Please feel free to submit a Pull Request. For major changes, please open an issue first to discuss what you would like to change.
 
+### TODOs!
+
+  1. Batch training - Process multiple ontologies efficiently in parallel
+  2. Model finetuning - Allow incremental training and adaptation of existing models
+  3. Provenance tracking - Keep metadata about source OWL files for traceability
+  4. Embedding injection - Store embeddings directly in OWL files using base64 encoding
+  5. Parameter optimization - Automated hyperparameter tuning and optimization
+  6. Use case examples - Comprehensive documentation and examples for different scenarios
+
 ## Citation
 
 If you use on2vec in your research, please cite:
