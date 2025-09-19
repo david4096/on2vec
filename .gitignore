@@ -1,3 +1,10 @@
+.python-version
+MANIFEST.in
+models/
+results/
+scripts/
+uv.lock
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

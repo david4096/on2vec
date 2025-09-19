@@ -249,15 +249,27 @@ def setup_hf_batch_parser(subparsers):
     training_group = hf_batch_parser.add_argument_group('Training Configuration')
     training_group.add_argument('--epochs', nargs='+', type=int, default=[100],
                                help='Training epochs to test (can specify multiple)')
-    training_group.add_argument('--model-type', choices=['gcn', 'gat', 'rgcn', 'heterogeneous'],
-                               default='gcn', help='GNN model architecture')
-    training_group.add_argument('--hidden-dim', type=int, default=128, help='Hidden layer dimensions')
-    training_group.add_argument('--out-dim', type=int, default=64, help='Output embedding dimensions')
-    training_group.add_argument('--loss-fn', choices=['triplet', 'contrastive', 'cosine', 'cross_entropy'],
-                               default='triplet', help='Loss function')
+    training_group.add_argument('--model-types', nargs='+', choices=['gcn', 'gat', 'rgcn', 'heterogeneous'],
+                               default=['gcn'], help='GNN model architectures to test (can specify multiple)')
+    training_group.add_argument('--hidden-dims', nargs='+', type=int, default=[128],
+                               help='Hidden layer dimensions to test (can specify multiple)')
+    training_group.add_argument('--out-dims', nargs='+', type=int, default=[64],
+                               help='Output embedding dimensions to test (can specify multiple)')
+    training_group.add_argument('--loss-fns', nargs='+', choices=['triplet', 'contrastive', 'cosine', 'cross_entropy'],
+                               default=['triplet'], help='Loss functions to test (can specify multiple)')
     training_group.add_argument('--use-multi-relation', action='store_true',
                                help='Include all ObjectProperty relations')
     training_group.add_argument('--text-model', help='Text model for semantic features (overrides base-model for training)')
+
+    # Keep backward compatibility with singular versions
+    training_group.add_argument('--model-type', choices=['gcn', 'gat', 'rgcn', 'heterogeneous'],
+                               help='Single GNN model architecture (deprecated, use --model-types)')
+    training_group.add_argument('--hidden-dim', type=int,
+                               help='Single hidden layer dimension (deprecated, use --hidden-dims)')
+    training_group.add_argument('--out-dim', type=int,
+                               help='Single output embedding dimension (deprecated, use --out-dims)')
+    training_group.add_argument('--loss-fn', choices=['triplet', 'contrastive', 'cosine', 'cross_entropy'],
+                               help='Single loss function (deprecated, use --loss-fns)')
 
     # Model details configuration
     details_group = hf_batch_parser.add_argument_group('Model Details')
@@ -607,12 +619,29 @@ def run_hf_batch_command(args):
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
     logger = logging.getLogger(__name__)
 
-    # Build training configuration
+    # Build training configuration with backward compatibility
+    # Handle backward compatibility - convert singular to plural
+    model_types = args.model_types
+    if args.model_type and args.model_type not in model_types:
+        model_types = [args.model_type]
+
+    hidden_dims = args.hidden_dims
+    if args.hidden_dim and args.hidden_dim not in hidden_dims:
+        hidden_dims = [args.hidden_dim]
+
+    out_dims = args.out_dims
+    if args.out_dim and args.out_dim not in out_dims:
+        out_dims = [args.out_dim]
+
+    loss_fns = args.loss_fns
+    if args.loss_fn and args.loss_fn not in loss_fns:
+        loss_fns = [args.loss_fn]
+
     training_config = {
-        'model_type': args.model_type,
-        'hidden_dim': args.hidden_dim,
-        'out_dim': args.out_dim,
-        'loss_fn': args.loss_fn,
+        'model_types': model_types,
+        'hidden_dims': hidden_dims,
+        'out_dims': out_dims,
+        'loss_fns': loss_fns,
         'use_multi_relation': args.use_multi_relation,
     }
 
@@ -668,6 +697,7 @@ def run_hf_batch_command(args):
             force_retrain=args.force_retrain,
             owl_pattern=args.owl_pattern,
             limit=args.limit,
+            training_config=training_config,  # ADD THIS!
             model_details=model_details if model_details else None,
             upload_options=upload_options if upload_options else None
         )
