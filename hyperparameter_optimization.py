@@ -4,7 +4,7 @@ import plotly
 from evaluate import load_ontology, evaluate_embeddings
 from on2vec.training import train_ontology_embeddings, train_text_augmented_ontology_embeddings
 from on2vec.embedding import embed_ontology_with_model
-
+from on2vec.evaluation import evaluate_embeddings as on2vec_evaluate_embeddings
 def train_ontology_embeddings_wrapper(owl_file, 
         model_output, 
         model_type, 
@@ -61,7 +61,7 @@ def train_ontology_embeddings_wrapper(owl_file,
 
 
 
-def define_objective(trial, owl_file, model_output, epochs, use_multi_relation=False, dropout=0.0, num_bases=None, parquet_file='embeddings.parquet', include_text_features=False, relationship=['rdfs:subClassOf']):
+def define_objective(trial, owl_file, model_output, epochs, use_multi_relation=False, dropout=0.0, num_bases=None, parquet_file='embeddings.parquet', include_text_features=False, relationship=['rdfs:subClassOf'],evaluator='on2vec_eval'):
     # Hyperparameters to optimize
     # Load ontology
     ontology = load_ontology(owl_file)
@@ -109,24 +109,33 @@ def define_objective(trial, owl_file, model_output, epochs, use_multi_relation=F
         #fusion_method=fusion_method
         )
     
-    embeddings = embed_ontology_with_model(owl_file=owl_file, 
+    embed_ontology_with_model(owl_file=owl_file, 
                               model_path=model_output,
                             output_file=parquet_file
 )
-    # Evaluate embeddings
-    ontology = load_ontology(owl_file)
-    embeddings_df = pd.read_parquet(parquet_file)
-    metrics = evaluate_embeddings(ontology,embeddings_df, relationship=relationship)
-    roc_auc = metrics["roc_auc"]
-    mean_rank = metrics["mean_rank"]
+   
+    roc_auc = 0.0
+    #mean_rank = float('inf')
+    if(evaluator=='on2vec_eval'):
+        vals = on2vec_evaluate_embeddings(parquet_file,owl_file)
+        roc_auc = vals["roc_auc"]
+        #mean_rank = vals["mean_rank"]
+    else:
+         # Evaluate embeddings
+        ontology = load_ontology(owl_file)
+        embeddings_df = pd.read_parquet(parquet_file)
+        metrics = evaluate_embeddings(ontology,embeddings_df, relationship=relationship)
+        roc_auc = metrics["roc_auc"]
+        #mean_rank = metrics["mean_rank"]
     # Evaluate model
 
-    return roc_auc, mean_rank
-study = optuna.create_study(directions=["maximize", "minimize"])
-study.optimize(lambda trial: define_objective(trial, owl_file='test.owl', model_output='model.pth', epochs=10, use_multi_relation=True, dropout=0.0, num_bases=5, parquet_file='embeddings.parquet',include_text_features=False, relationship= ['interacts_with'] 
+    return roc_auc #, mean_rank
+study = optuna.create_study(directions=["maximize"])
+study.optimize(lambda trial: define_objective(trial, owl_file='EDAM.owl', model_output='model.pth', epochs=10, use_multi_relation=True, dropout=0.0, num_bases=5, parquet_file='embeddings.parquet',include_text_features=False, relationship= None, evaluator='on2vec_eval' 
                                               #,fusion_method='concat'
                                               ), n_trials=50)
-optuna.visualization.plot_pareto_front(study, target_names=["roc_auc", "mean_rank"])  
+paretoplot=optuna.visualization.plot_pareto_front(study, target_names=["roc_auc"])  
+paretoplot.write_html("pareto_front.html")
 print(f"Number of trials on the Pareto front: {len(study.best_trials)}")
 # Print details of the trial with the highest accuracy
 trial_with_highest_accuracy = max(study.best_trials, key=lambda t: t.values[1])
@@ -135,10 +144,11 @@ print(f"\tnumber: {trial_with_highest_accuracy.number}")
 print(f"\tparams: {trial_with_highest_accuracy.params}")
 print(f"\tvalues: {trial_with_highest_accuracy.values}")
 #Plot of hyperparameter importance for roc_auc
-optuna.visualization.plot_param_importances(
+hyperparameterimportanceroc=optuna.visualization.plot_param_importances(
     study, target=lambda t: t.values[0], target_name="roc_auc"
 )
+hyperparameterimportanceroc.write_html("hyperparameter_importance_roc.html")
 #Plot of hyperparameter importance for mean_rank
-optuna.visualization.plot_param_importances(
-    study, target=lambda t: t.values[0], target_name="mean_rank"
-)
+#hyperparameterimportancemeanrank=optuna.visualization.plot_param_importances(
+#    study, target=lambda t: t.values[0], target_name="mean_rank"
+#)
