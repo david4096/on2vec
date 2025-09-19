@@ -5,6 +5,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2025-01-20
+
+### Added
+- **GPU Support**: Complete GPU acceleration for GNN training with automatic device detection (CUDA → MPS → CPU fallback)
+- **Device Utilities**: New `device_utils.py` module with intelligent device management and optimization tips
+- **Performance Enhancements**: Memory usage monitoring and device-specific optimization settings
+- **Generic Model Comparison**: New `model_comparison.py` module for comparing ontology vs vanilla models
+- **Improved Testing**: GPU support validation and end-to-end training tests
+
+### Fixed
+- **Broken Compare Command**: Fixed `on2vec compare` command that was importing non-existent `test_edam_model.py`
+- **Device Compatibility**: All models, training, and embedding generation now support GPU acceleration
+- **Import Issues**: Resolved broken CLI imports and dependencies
+- **Tensor Device Mismatches**: Fixed tensor placement issues in multi-device scenarios
+
+### Changed
+- **Enhanced Training Pipeline**: All training workflows now support device specification and GPU acceleration
+- **Better Error Handling**: Improved device detection with fallback strategies and informative warnings
+- **Memory Management**: Added GPU memory monitoring and optimization recommendations
+- **Model Architecture**: Updated all GNN models (GCN, GAT, RGCN, Heterogeneous) to be device-aware
+
+### Performance
+- **Significant Speed Improvements**: Text-augmented training shows major performance gains on GPU (e.g., 0.08s on MPS)
+- **Memory Efficiency**: Optimized tensor operations for GPU memory usage
+- **Automatic Optimization**: Device-specific settings for optimal performance
+
+### Technical Improvements
+- Added comprehensive device detection and validation
+- Enhanced error messages with device context
+- Improved model checkpointing with device state preservation
+- Better cross-platform compatibility (CUDA, MPS, CPU)
+
+### Documentation
+- Added GPU setup and usage documentation
+- Performance benchmarking results and recommendations
+- Device-specific optimization guides
+
 ## [0.1.0] - 2025-01-18
 
 ### Added
