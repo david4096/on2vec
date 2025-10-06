@@ -10,12 +10,12 @@ For the evaluation, we downloaded the omim-ordo benchmark datasets Version OAEI 
 
 ### Workflow
 #### 1. Merge ontologies
-```bash
+```
 python ontology_merger.py omim-ordo/omim.owl omim-ordo/ordo.owl ./ontology_merged.owl
 ```
 
 #### 2. Train `on2vec` model 
-```bash
+```
 on2vec train ontology_merged.owl --output omim_ordo_alignment_g cn_model.pt --model-type gcn --epochs 100
 ```
 
@@ -24,4 +24,4 @@ on2vec train ontology_merged.owl --output omim_ordo_alignment_g cn_model.pt --mo
 on2vec embed --output omim_ordo_alignment_gcn_embeddings.parquet omim_ordo_alignment_gcn_model.pt ontology_merged.owl
 ```
 
-#### 4. Evaluate alignment _in progress_
+#### 4. Evaluate alignment _future work_
